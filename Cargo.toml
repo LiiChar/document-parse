@@ -21,9 +21,9 @@ categories = [
     "text-processing",
 ]
 
-# repository = "https://github.com/..."
-# homepage = "https://github.com/..."
-# documentation = "https://docs.rs/totext"
+repository = "https://github.com/LiiChar/document-parse"
+homepage = "https://github.com/LiiChar/document-parse"
+# documentation = "https://docs.rs/document-parse"
 
 [features]
 
