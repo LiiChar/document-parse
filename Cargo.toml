@@ -1,0 +1,195 @@
+[package]
+name = "document-parser"
+version = "0.1.0-alpha.1"
+edition = "2024"
+rust-version = "1.85"
+
+description = "A pure-Rust document parsing library for extracting normalized HTML and text from books and documents."
+license = "MIT OR Apache-2.0"
+readme = "README.md"
+
+keywords = [
+    "document",
+    "parser",
+    "ebook",
+    "epub",
+    "pdf",
+]
+
+categories = [
+    "parser-implementations",
+    "text-processing",
+]
+
+# repository = "https://github.com/..."
+# homepage = "https://github.com/..."
+# documentation = "https://docs.rs/totext"
+
+[features]
+
+# ------------------------------------------------------------
+# Default
+# ------------------------------------------------------------
+
+default = ["full"]
+
+# Все поддерживаемые форматы.
+full = [
+    "txt",
+    "markdown",
+    "html",
+    "rtf",
+    "fb2",
+    "epub",
+    "cbz",
+    "docx",
+    "mobi",
+    "pdf",
+    "scanner",
+]
+
+# ------------------------------------------------------------
+# Individual formats
+# ------------------------------------------------------------
+
+txt = [
+    "dep:encoding_rs",
+]
+
+markdown = [
+    "dep:pulldown-cmark",
+]
+
+html = [
+    "dep:encoding_rs",
+]
+
+rtf = [
+    "dep:encoding_rs",
+    "dep:rtf-parser",
+]
+
+fb2 = [
+    "dep:encoding_rs",
+    "dep:roxmltree",
+    "dep:zip",
+]
+
+epub = [
+    "dep:encoding_rs",
+    "dep:roxmltree",
+    "dep:zip",
+]
+
+cbz = [
+    "dep:natord",
+    "dep:zip",
+]
+
+docx = [
+    "dep:docx-rust",
+    "dep:xmltree",
+    "dep:zip",
+]
+
+mobi = [
+    "dep:mobi",
+    "dep:scraper",
+]
+
+pdf = [
+    "dep:pdf-extract",
+]
+
+# ------------------------------------------------------------
+# Optional functionality
+# ------------------------------------------------------------
+
+scanner = [
+    "dep:walkdir",
+]
+
+logging = [
+    "dep:log",
+]
+
+serde = [
+    "dep:serde",
+]
+
+# ------------------------------------------------------------
+# Common dependencies
+# ------------------------------------------------------------
+
+[dependencies]
+
+# HTML sanitization
+ammonia = "4.1.4"
+
+# Resource handling / ImageLoadType::Base64
+base64 = "0.23.1"
+
+# HTML -> text, used by finalization
+html2text = "0.17.1"
+
+# Regular expressions for normalization
+regex = "1.13.1"
+
+# Stable document/resource IDs
+sha2 = "0.11.0"
+
+# Public error API
+thiserror = "2.0.20"
+
+# Language detection
+whatlang = "0.18.0"
+
+# Hex encoded metadata / format-specific decoding
+hex = "0.4.3"
+
+# Optional serialization for public models
+serde = { version = "1.0", features = ["derive"], optional = true }
+
+# Optional logging
+log = { version = "0.4", optional = true }
+
+# ------------------------------------------------------------
+# Optional format dependencies
+# ------------------------------------------------------------
+
+encoding_rs = { version = "0.8.35", optional = true }
+
+docx-rust = { version = "0.1.11", optional = true }
+
+mobi = { version = "0.8.0", optional = true }
+
+natord = { version = "1.0.9", optional = true }
+
+pdf-extract = { version = "0.12.0", optional = true }
+
+pulldown-cmark = { version = "0.13.4", optional = true }
+
+roxmltree = { version = "0.21.1", optional = true }
+
+rtf-parser = { version = "0.4.3", optional = true }
+
+scraper = { version = "0.27.0", optional = true }
+
+walkdir = { version = "2.5.0", optional = true }
+
+xmltree = { version = "0.12.0", optional = true }
+
+zip = { version = "8.6.0", optional = true }
+
+# ------------------------------------------------------------
+# Development
+# ------------------------------------------------------------
+
+[dev-dependencies]
+
+insta = "1"
+pretty_assertions = "1"
+tempfile = "3"
+
+[package.metadata.docs.rs]
+all-features = true
