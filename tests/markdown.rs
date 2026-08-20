@@ -1,9 +1,6 @@
 mod common;
 
-use document_parser::{
-    model::ChapterContent,
-    parser::DocumentParser,
-};
+use document_parser::{model::ChapterContent, parser::DocumentParser};
 
 use common::TestFile;
 
@@ -23,34 +20,21 @@ Hello **world**.
 "#,
     );
 
-    let document =
-        DocumentParser::new()
-            .parse(&file.path)
-            .expect("failed to parse");
+    let document = DocumentParser::new()
+        .parse(&file.path)
+        .expect("failed to parse");
 
-    let html =
-        match &document.content.chapters[0].content {
-            ChapterContent::Html(html) => html,
+    let html = match &document.content.chapters[0].content {
+        ChapterContent::Html(html) => html,
 
-            _ => panic!(
-                "expected HTML"
-            ),
-        };
+        _ => panic!("expected HTML"),
+    };
 
-    assert!(
-        html.contains("<h1>")
-    );
+    assert!(html.contains("<h1>"));
 
-    assert!(
-        html.contains("<strong>world</strong>")
-    );
+    assert!(html.contains("<strong>world</strong>"));
 
-    assert!(
-        html.contains("<ul>")
-    );
+    assert!(html.contains("<ul>"));
 
-    assert!(
-        html.contains("<del>")
-            || html.contains("<s>")
-    );
+    assert!(html.contains("<del>") || html.contains("<s>"));
 }

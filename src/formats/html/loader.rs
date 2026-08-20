@@ -18,18 +18,11 @@ impl Loader for HtmlLoader {
         path.extension()
             .and_then(|extension| extension.to_str())
             .is_some_and(|extension| {
-                matches!(
-                    extension.to_ascii_lowercase().as_str(),
-                    "html" | "htm"
-                )
+                matches!(extension.to_ascii_lowercase().as_str(), "html" | "htm")
             })
     }
 
-    fn load(
-        &self,
-        path: &Path,
-        _options: &ParseOptions,
-    ) -> Result<RawDocument, Error> {
+    fn load(&self, path: &Path, _options: &ParseOptions) -> Result<RawDocument, Error> {
         let bytes = fs::read(path)?;
         let html = decode_text(&bytes);
 
@@ -54,18 +47,14 @@ impl Loader for HtmlLoader {
 ///
 /// Сначала пытается получить `<title>`.
 /// Если `<title>` отсутствует, используется имя файла.
-fn extract_title(
-    path: &Path,
-    html: &str,
-) -> Option<String> {
-    extract_html_title(html)
-        .or_else(|| {
-            path.file_stem()
-                .and_then(|value| value.to_str())
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .map(str::to_owned)
-        })
+fn extract_title(path: &Path, html: &str) -> Option<String> {
+    extract_html_title(html).or_else(|| {
+        path.file_stem()
+            .and_then(|value| value.to_str())
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_owned)
+    })
 }
 
 /// Извлекает содержимое `<title>`.
@@ -76,26 +65,15 @@ fn extract_html_title(html: &str) -> Option<String> {
     let lower = html.to_ascii_lowercase();
 
     let start = lower.find("<title")?;
-    let start_tag_end = lower[start..]
-        .find('>')?
-        + start
-        + 1;
+    let start_tag_end = lower[start..].find('>')? + start + 1;
 
-    let end = lower[start_tag_end..]
-        .find("</title>")?
-        + start_tag_end;
+    let end = lower[start_tag_end..].find("</title>")? + start_tag_end;
 
     let title = &html[start_tag_end..end];
 
-    let title = strip_html_tags(title)
-        .trim()
-        .to_owned();
+    let title = strip_html_tags(title).trim().to_owned();
 
-    if title.is_empty() {
-        None
-    } else {
-        Some(title)
-    }
+    if title.is_empty() { None } else { Some(title) }
 }
 
 /// Удаляет HTML-теги из небольшого metadata-фрагмента.

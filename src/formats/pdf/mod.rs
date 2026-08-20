@@ -1,3 +1,3 @@
-mod pdf;
+mod loader;
 
-pub use pdf::*;
+pub use loader::*;

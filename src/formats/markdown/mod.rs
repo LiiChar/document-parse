@@ -1,3 +1,3 @@
-mod markdown;
+mod loader;
 
-pub use markdown::*;
+pub use loader::*;

@@ -1,3 +1,3 @@
-mod docx;
+mod loader;
 
-pub use docx::*;
+pub use loader::*;

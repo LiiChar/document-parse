@@ -1,22 +1,11 @@
 use std::{fs, path::Path};
 
-use pulldown_cmark::{
-    html,
-    Options,
-    Parser,
-};
+use pulldown_cmark::{Options, Parser, html};
 
 use crate::{
     error::Error,
-    model::{
-        RawChapter,
-        RawDocument,
-        RawMetadata,
-    },
-    parser::{
-        Loader,
-        ParseOptions,
-    },
+    model::{RawChapter, RawDocument, RawMetadata},
+    parser::{Loader, ParseOptions},
     utils::text::decode_text,
 };
 
@@ -27,18 +16,11 @@ impl Loader for MarkdownLoader {
         path.extension()
             .and_then(|extension| extension.to_str())
             .is_some_and(|extension| {
-                matches!(
-                    extension.to_ascii_lowercase().as_str(),
-                    "md" | "markdown"
-                )
+                matches!(extension.to_ascii_lowercase().as_str(), "md" | "markdown")
             })
     }
 
-    fn load(
-        &self,
-        path: &Path,
-        _options: &ParseOptions,
-    ) -> Result<RawDocument, Error> {
+    fn load(&self, path: &Path, _options: &ParseOptions) -> Result<RawDocument, Error> {
         let bytes = fs::read(path)?;
         let markdown = decode_text(&bytes);
 
@@ -52,12 +34,10 @@ impl Loader for MarkdownLoader {
                 language: None,
                 cover_id: None,
             },
-            chapters: vec![
-                RawChapter {
-                    title: None,
-                    content: html,
-                },
-            ],
+            chapters: vec![RawChapter {
+                title: None,
+                content: html,
+            }],
             resources: Vec::new(),
         })
     }
@@ -76,37 +56,21 @@ fn extract_title(path: &Path) -> Option<String> {
 fn markdown_to_html(markdown: &str) -> String {
     let mut options = Options::empty();
 
-    options.insert(
-        Options::ENABLE_STRIKETHROUGH,
-    );
+    options.insert(Options::ENABLE_STRIKETHROUGH);
 
-    options.insert(
-        Options::ENABLE_TABLES,
-    );
+    options.insert(Options::ENABLE_TABLES);
 
-    options.insert(
-        Options::ENABLE_TASKLISTS,
-    );
+    options.insert(Options::ENABLE_TASKLISTS);
 
-    options.insert(
-        Options::ENABLE_FOOTNOTES,
-    );
+    options.insert(Options::ENABLE_FOOTNOTES);
 
-    options.insert(
-        Options::ENABLE_HEADING_ATTRIBUTES,
-    );
+    options.insert(Options::ENABLE_HEADING_ATTRIBUTES);
 
-    let parser = Parser::new_ext(
-        markdown,
-        options,
-    );
+    let parser = Parser::new_ext(markdown, options);
 
     let mut html_output = String::new();
 
-    html::push_html(
-        &mut html_output,
-        parser,
-    );
+    html::push_html(&mut html_output, parser);
 
     html_output
 }

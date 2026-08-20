@@ -1,9 +1,5 @@
 use crate::{model::Chapter, utils::html::html_to_text};
 
-const MIN_TEXT_LEN: usize = 20;
-const SAMPLE_CHAPTERS: usize = 3;
-const DEFAULT_LANGUAGE: &str = "en";
-
 /// Определяет язык по первым нескольким главам.
 pub fn detect_document_language(chapters: &[Chapter]) -> Option<String> {
     let text = chapters
@@ -19,6 +15,5 @@ pub fn detect_document_language(chapters: &[Chapter]) -> Option<String> {
         return None;
     }
 
-    whatlang::detect(&sample)
-        .map(|info| info.lang().code().to_string())
+    whatlang::detect(&sample).map(|info| info.lang().code().to_string())
 }

@@ -1,6 +1,5 @@
 mod common;
 
-
 use common::TestFile;
 use document_parser::{DocumentParser, ParseOptions, model::ChapterContent};
 
@@ -21,21 +20,15 @@ fn html_is_preserved() {
 "#,
     );
 
-    let document =
-        DocumentParser::new()
-            .parse(&file.path)
-            .expect("failed to parse");
+    let document = DocumentParser::new()
+        .parse(&file.path)
+        .expect("failed to parse");
 
-    assert_eq!(
-        document.metadata.title,
-        "My Book"
-    );
+    assert_eq!(document.metadata.title, "My Book");
 
     match &document.content.chapters[0].content {
         ChapterContent::Html(html) => {
-            assert!(
-                html.contains("<h1>")
-            );
+            assert!(html.contains("<h1>"));
         }
 
         _ => panic!("expected HTML"),
@@ -56,29 +49,22 @@ fn html_sanitization_removes_script() {
 "#,
     );
 
-    let options =
-        ParseOptions {
-            sanitize_html: true,
-            ..Default::default()
-        };
+    let options = ParseOptions {
+        sanitize_html: true,
+        ..Default::default()
+    };
 
-    let document =
-        DocumentParser::new()
-            .with_options(options)
-            .parse(&file.path)
-            .expect("failed to parse");
+    let document = DocumentParser::new()
+        .with_options(options)
+        .parse(&file.path)
+        .expect("failed to parse");
 
-    let html =
-        match &document.content.chapters[0].content {
-            ChapterContent::Html(html) => html,
-            _ => panic!("expected HTML"),
-        };
+    let html = match &document.content.chapters[0].content {
+        ChapterContent::Html(html) => html,
+        _ => panic!("expected HTML"),
+    };
 
-    assert!(
-        !html.contains("<script")
-    );
+    assert!(!html.contains("<script"));
 
-    assert!(
-        html.contains("Hello")
-    );
+    assert!(html.contains("Hello"));
 }

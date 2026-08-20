@@ -1,3 +1,3 @@
-mod txt;
+mod loader;
 
-pub use txt::TxtLoader;
+pub use loader::TxtLoader;

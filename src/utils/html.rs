@@ -9,11 +9,6 @@ pub fn html_to_text(html: &str) -> String {
         .join(" ")
 }
 
-pub fn count_text_chars(html: &str) -> u64 {
-    html_to_text(html).chars().count() as u64
-}
-
-
 pub fn sanitize_html(html: &str) -> String {
     ammonia::Builder::default()
         .add_tags(["img", "h1", "h2", "h3", "h4"])
@@ -21,9 +16,7 @@ pub fn sanitize_html(html: &str) -> String {
         .to_string()
 }
 
-pub fn normalize_html_whitespace(
-    html: &str,
-) -> String {
+pub fn normalize_html_whitespace(html: &str) -> String {
     html.lines()
         .map(str::trim)
         .filter(|line| !line.is_empty())

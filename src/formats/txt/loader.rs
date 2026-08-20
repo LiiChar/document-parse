@@ -1,7 +1,10 @@
 use std::{fs, path::Path};
 
 use crate::{
-    error::Error, model::{RawChapter, RawDocument, RawMetadata}, parser::{Loader, ParseOptions}, utils::text::{decode_text, split_into_chapters, text_to_html},
+    error::Error,
+    model::{RawChapter, RawDocument, RawMetadata},
+    parser::{Loader, ParseOptions},
+    utils::text::{decode_text, split_into_chapters, text_to_html},
 };
 
 pub struct TxtLoader;
@@ -14,11 +17,7 @@ impl Loader for TxtLoader {
             .unwrap_or(false)
     }
 
-    fn load(
-        &self,
-        path: &Path,
-        options: &ParseOptions,
-    ) -> Result<RawDocument, Error> {
+    fn load(&self, path: &Path, options: &ParseOptions) -> Result<RawDocument, Error> {
         let bytes = fs::read(path)?;
         let text = decode_text(&bytes);
 

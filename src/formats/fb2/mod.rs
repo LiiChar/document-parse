@@ -1,3 +1,3 @@
-mod fb2;
+mod loader;
 
-pub use fb2::*;
+pub use loader::*;

@@ -1,9 +1,6 @@
 mod common;
 
-use document_parser::{
-    model::ChapterContent,
-    parser::DocumentParser,
-};
+use document_parser::{model::ChapterContent, parser::DocumentParser};
 
 use common::TestFile;
 
@@ -13,29 +10,20 @@ fn rtf_preserves_basic_formatting() {
 This is \b bold\b0  and \i italic\i0 .
 }"#;
 
-    let file = TestFile::new(
-        "book.rtf",
-        rtf,
-    );
+    let file = TestFile::new("book.rtf", rtf);
 
-    let document =
-        DocumentParser::new()
-            .parse(&file.path)
-            .expect("failed to parse");
+    let document = DocumentParser::new()
+        .parse(&file.path)
+        .expect("failed to parse");
 
-    let html =
-        match &document.content.chapters[0].content {
-            ChapterContent::Html(html) => html,
-            _ => panic!("expected HTML"),
-        };
+    let html = match &document.content.chapters[0].content {
+        ChapterContent::Html(html) => html,
+        _ => panic!("expected HTML"),
+    };
 
-    assert!(
-        html.contains("<strong>")
-    );
+    assert!(html.contains("<strong>"));
 
-    assert!(
-        html.contains("<em>")
-    );
+    assert!(html.contains("<em>"));
 }
 
 #[test]
@@ -45,24 +33,16 @@ fn rtf_handles_cyrillic() {
 \f0 Привет мир.
 }"#;
 
-    let file =
-        TestFile::new(
-            "russian.rtf",
-            rtf,
-        );
+    let file = TestFile::new("russian.rtf", rtf);
 
-    let document =
-        DocumentParser::new()
-            .parse(&file.path)
-            .expect("failed to parse");
+    let document = DocumentParser::new()
+        .parse(&file.path)
+        .expect("failed to parse");
 
-    let html =
-        match &document.content.chapters[0].content {
-            ChapterContent::Html(html) => html,
-            _ => panic!("expected HTML"),
-        };
+    let html = match &document.content.chapters[0].content {
+        ChapterContent::Html(html) => html,
+        _ => panic!("expected HTML"),
+    };
 
-    assert!(
-        html.contains("Привет")
-    );
+    assert!(html.contains("Привет"));
 }

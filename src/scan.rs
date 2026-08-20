@@ -3,8 +3,8 @@ use walkdir::WalkDir;
 
 pub fn collect_paths(path: impl AsRef<Path>) -> Vec<PathBuf> {
     let extensions = [
-        "txt", "epub", "fb2", "zip", "html", "htm",
-        "md", "markdown", "docx", "pdf", "cbz", "mobi", "rtf",
+        "txt", "epub", "fb2", "zip", "html", "htm", "md", "markdown", "docx", "pdf", "cbz", "mobi",
+        "rtf",
     ];
 
     WalkDir::new(path)

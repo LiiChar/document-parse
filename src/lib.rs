@@ -10,8 +10,5 @@ pub use error::Error;
 pub use parser::{DocumentParser, Loader, ParseOptions};
 
 pub mod prelude {
-    pub use crate::{
-        DocumentParser,
-        ParseOptions,
-    };
+    pub use crate::{DocumentParser, ParseOptions};
 }

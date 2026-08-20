@@ -1,3 +1,3 @@
-mod epub;
+mod loader;
 
-pub use epub::*;
+pub use loader::*;

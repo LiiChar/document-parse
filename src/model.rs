@@ -22,14 +22,14 @@ pub struct Content {
 #[derive(Debug, Clone)]
 pub enum ChapterContent {
     Text(String),
-    Html(String)
+    Html(String),
 }
 
 impl ChapterContent {
-    pub fn content (&self) -> String {
+    pub fn content(&self) -> String {
         match self {
             ChapterContent::Html(s) => s.clone(),
-            ChapterContent::Text(s) => s.clone()
+            ChapterContent::Text(s) => s.clone(),
         }
     }
 }
@@ -53,7 +53,7 @@ pub struct RawMetadata {
     pub author: Option<String>,
     pub description: Option<String>,
     pub language: Option<String>,
-    pub cover_id: Option<String>
+    pub cover_id: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -62,7 +62,6 @@ pub struct RawResource {
     pub mime_type: String,
     pub data: Vec<u8>,
 }
-
 
 #[derive(Debug, Clone)]
 pub struct RawChapter {

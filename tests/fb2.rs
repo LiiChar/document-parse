@@ -1,6 +1,5 @@
 // use document_parser::DocumentParser;
 
-
 // #[test]
 // fn fb2_extracts_metadata() {
 //     let data =
@@ -31,7 +30,6 @@
 //         !document.content.chapters.is_empty()
 //     );
 // }
-
 
 // #[test]
 // fn fb2_extracts_images() {

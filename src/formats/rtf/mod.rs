@@ -1,4 +1,4 @@
-pub mod rtf;
 pub mod decode;
+mod loader;
 
-pub use rtf::*;
+pub use loader::*;

@@ -1,3 +1,3 @@
-pub mod cbz;
+mod loader;
 
-pub use cbz::*;
+pub use loader::*;

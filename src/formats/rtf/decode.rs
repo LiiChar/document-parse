@@ -1,25 +1,18 @@
-use encoding_rs::{
-    BIG5,
-    EUC_KR,
-    GBK,
-    SHIFT_JIS,
-    UTF_8,
-    WINDOWS_1250,
-    WINDOWS_1251,
-    WINDOWS_1252,
-};
+use encoding_rs::{BIG5, EUC_KR, GBK, SHIFT_JIS, WINDOWS_1250, WINDOWS_1251, WINDOWS_1252};
 
 pub fn decode_rtf(bytes: &[u8]) -> String {
+    // Сначала пробуем UTF-8 — многие файлы с кириллицей
+    // реально сохранены в UTF-8, даже с декларацией \ansicpg1251.
+    if let Ok(text) = std::str::from_utf8(bytes) {
+        return text.to_owned();
+    }
+
     if let Some(code_page) = detect_rtf_code_page(bytes) {
         if let Some(encoding) = encoding_from_code_page(code_page) {
             let (text, _, _) = encoding.decode(bytes);
 
             return text.into_owned();
         }
-    }
-
-    if let Ok(text) = std::str::from_utf8(bytes) {
-        return text.to_owned();
     }
 
     let (text, _, _) = WINDOWS_1252.decode(bytes);
@@ -30,9 +23,7 @@ pub fn decode_rtf(bytes: &[u8]) -> String {
 fn detect_rtf_code_page(bytes: &[u8]) -> Option<u16> {
     const MAX_HEADER_SIZE: usize = 4096;
 
-    let header_len = bytes
-        .len()
-        .min(MAX_HEADER_SIZE);
+    let header_len = bytes.len().min(MAX_HEADER_SIZE);
 
     let header = &bytes[..header_len];
 
@@ -46,9 +37,7 @@ fn detect_rtf_code_page(bytes: &[u8]) -> Option<u16> {
 
     let mut end = start;
 
-    while end < header.len()
-        && header[end].is_ascii_digit()
-    {
+    while end < header.len() && header[end].is_ascii_digit() {
         end += 1;
     }
 
@@ -62,9 +51,7 @@ fn detect_rtf_code_page(bytes: &[u8]) -> Option<u16> {
         .ok()
 }
 
-fn encoding_from_code_page(
-    code_page: u16,
-) -> Option<&'static encoding_rs::Encoding> {
+fn encoding_from_code_page(code_page: u16) -> Option<&'static encoding_rs::Encoding> {
     match code_page {
         1250 => Some(WINDOWS_1250),
         1251 => Some(WINDOWS_1251),

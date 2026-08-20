@@ -1,7 +1,4 @@
-use std::{
-    collections::HashSet,
-    sync::OnceLock,
-};
+use std::sync::OnceLock;
 
 use encoding_rs::WINDOWS_1251;
 use regex::Regex;
@@ -17,7 +14,6 @@ const MAX_TITLE_LENGTH: usize = 120;
 #[derive(Debug, Clone)]
 struct TextBlock {
     text: String,
-    start_line: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -68,16 +64,14 @@ fn normalize_source_text(text: &str) -> String {
     text.trim_start_matches('\u{FEFF}')
         .replace("\r\n", "\n")
         .replace('\r', "\n")
-        .replace('\u{00A0}', " ")
-        .replace('\t', " ")
+        .replace(['\u{00A0}', '\t'], " ")
 }
 
 fn split_into_blocks(text: &str) -> Vec<TextBlock> {
     let mut blocks = Vec::new();
     let mut current_lines = Vec::new();
-    let mut start_line = 0;
 
-    for (line_number, raw_line) in text.lines().enumerate() {
+    for raw_line in text.lines() {
         let line = raw_line.trim();
 
         if line.is_empty() {
@@ -87,7 +81,6 @@ fn split_into_blocks(text: &str) -> Vec<TextBlock> {
                 if !block.trim().is_empty() {
                     blocks.push(TextBlock {
                         text: normalize_block_text(&block),
-                        start_line,
                     });
                 }
 
@@ -95,10 +88,6 @@ fn split_into_blocks(text: &str) -> Vec<TextBlock> {
             }
 
             continue;
-        }
-
-        if current_lines.is_empty() {
-            start_line = line_number;
         }
 
         current_lines.push(line.to_string());
@@ -110,7 +99,6 @@ fn split_into_blocks(text: &str) -> Vec<TextBlock> {
         if !block.trim().is_empty() {
             blocks.push(TextBlock {
                 text: normalize_block_text(&block),
-                start_line,
             });
         }
     }
@@ -119,9 +107,7 @@ fn split_into_blocks(text: &str) -> Vec<TextBlock> {
 }
 
 fn normalize_block_text(text: &str) -> String {
-    text.split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 fn detect_chapter_boundaries(blocks: &[TextBlock]) -> Vec<ChapterBoundary> {
@@ -157,11 +143,7 @@ fn detect_chapter_boundaries(blocks: &[TextBlock]) -> Vec<ChapterBoundary> {
     result
 }
 
-fn detect_title(
-    block: &TextBlock,
-    blocks: &[TextBlock],
-    index: usize,
-) -> Option<String> {
+fn detect_title(block: &TextBlock, blocks: &[TextBlock], index: usize) -> Option<String> {
     let text = block.text.trim();
 
     if text.len() < MIN_TITLE_LENGTH || text.len() > MAX_TITLE_LENGTH {
@@ -261,37 +243,19 @@ fn is_explicit_chapter_title(text: &str) -> bool {
     let patterns = EXPLICIT.get_or_init(|| {
         vec![
             Regex::new(
-                r"(?i)^(chapter|chap\.?|глава|гл\.?)\s+([0-9]{1,4}|[ivxlcdm]+|[a-zа-яё]+)\b.*$"
+                r"(?i)^(chapter|chap\.?|глава|гл\.?)\s+([0-9]{1,4}|[ivxlcdm]+|[a-zа-яё]+)\b.*$",
             )
             .unwrap(),
-
+            Regex::new(r"(?i)^(part|часть)\s+([0-9]{1,4}|[ivxlcdm]+|[a-zа-яё]+)\b.*$").unwrap(),
+            Regex::new(r"(?i)^(book|книга)\s+([0-9]{1,4}|[ivxlcdm]+|[a-zа-яё]+)\b.*$").unwrap(),
+            Regex::new(r"(?i)^(section|section\.|секция|раздел)\s+([0-9]{1,4}|[ivxlcdm]+)\b.*$")
+                .unwrap(),
+            Regex::new(r"(?i)^(prologue|epilogue|introduction|foreword|afterword|appendix)$")
+                .unwrap(),
+            Regex::new(r"(?i)^(пролог|эпилог|введение|предисловие|послесловие|приложение)$")
+                .unwrap(),
             Regex::new(
-                r"(?i)^(part|часть)\s+([0-9]{1,4}|[ivxlcdm]+|[a-zа-яё]+)\b.*$"
-            )
-            .unwrap(),
-
-            Regex::new(
-                r"(?i)^(book|книга)\s+([0-9]{1,4}|[ivxlcdm]+|[a-zа-яё]+)\b.*$"
-            )
-            .unwrap(),
-
-            Regex::new(
-                r"(?i)^(section|section\.|секция|раздел)\s+([0-9]{1,4}|[ivxlcdm]+)\b.*$"
-            )
-            .unwrap(),
-
-            Regex::new(
-                r"(?i)^(prologue|epilogue|introduction|foreword|afterword|appendix)$"
-            )
-            .unwrap(),
-
-            Regex::new(
-                r"(?i)^(пролог|эпилог|введение|предисловие|послесловие|приложение)$"
-            )
-            .unwrap(),
-
-            Regex::new(
-                r"(?i)^(пролог|эпилог|введение|предисловие|послесловие|приложение)\s*[:\-—]?.*$"
+                r"(?i)^(пролог|эпилог|введение|предисловие|послесловие|приложение)\s*[:\-—]?.*$",
             )
             .unwrap(),
         ]
@@ -303,9 +267,8 @@ fn is_explicit_chapter_title(text: &str) -> bool {
 fn starts_with_number(text: &str) -> bool {
     static RE: OnceLock<Regex> = OnceLock::new();
 
-    let re = RE.get_or_init(|| {
-        Regex::new(r"^\s*(?:chapter\s+)?\d{1,4}(?:\s*[\.\-:)]|\s+|$)").unwrap()
-    });
+    let re =
+        RE.get_or_init(|| Regex::new(r"^\s*(?:chapter\s+)?\d{1,4}(?:\s*[\.\-:)]|\s+|$)").unwrap());
 
     re.is_match(text)
 }
@@ -314,10 +277,7 @@ fn starts_with_roman_number(text: &str) -> bool {
     static RE: OnceLock<Regex> = OnceLock::new();
 
     let re = RE.get_or_init(|| {
-        Regex::new(
-            r"(?i)^\s*(?:chapter|глава)?\s*[ivxlcdm]{1,8}(?:\s*[\.\-:)]|\s+|$)"
-        )
-        .unwrap()
+        Regex::new(r"(?i)^\s*(?:chapter|глава)?\s*[ivxlcdm]{1,8}(?:\s*[\.\-:)]|\s+|$)").unwrap()
     });
 
     re.is_match(text)
@@ -349,14 +309,11 @@ fn is_title_case(text: &str) -> bool {
         }
     }
 
-    meaningful_words > 0
-        && title_case_words as f32 / meaningful_words as f32 >= 0.6
+    meaningful_words > 0 && title_case_words as f32 / meaningful_words as f32 >= 0.6
 }
 
 fn is_all_caps(text: &str) -> bool {
-    let letters: Vec<char> = text.chars()
-        .filter(|c| c.is_alphabetic())
-        .collect();
+    let letters: Vec<char> = text.chars().filter(|c| c.is_alphabetic()).collect();
 
     if letters.len() < 3 {
         return false;
@@ -372,10 +329,8 @@ fn looks_like_sentence(text: &str) -> bool {
         return false;
     }
 
-    let sentence_end = text.ends_with('.')
-        || text.ends_with('!')
-        || text.ends_with('?')
-        || text.ends_with('…');
+    let sentence_end =
+        text.ends_with('.') || text.ends_with('!') || text.ends_with('?') || text.ends_with('…');
 
     if sentence_end {
         return true;
@@ -411,13 +366,10 @@ fn ends_with_sentence_punctuation(text: &str) -> bool {
 
 fn clean_title(text: &str) -> String {
     text.trim()
-        .trim_matches(|c: char| {
-            matches!(c, '#' | '*' | '_' | '"' | '\'' | '“' | '”' | '«' | '»')
-        })
+        .trim_matches(|c: char| matches!(c, '#' | '*' | '_' | '"' | '\'' | '“' | '”' | '«' | '»'))
         .trim()
         .to_string()
 }
-
 
 fn build_chapters_from_boundaries(
     blocks: &[TextBlock],
@@ -493,10 +445,7 @@ fn split_without_headings(blocks: &[TextBlock]) -> Vec<Chapter> {
         .collect();
 
     if meaningful_blocks.len() >= 3 {
-        let total_chars: usize = blocks
-            .iter()
-            .map(|block| block.text.chars().count())
-            .sum();
+        let total_chars: usize = blocks.iter().map(|block| block.text.chars().count()).sum();
 
         let average = total_chars / blocks.len().max(1);
 
@@ -516,10 +465,7 @@ fn split_without_headings(blocks: &[TextBlock]) -> Vec<Chapter> {
 }
 
 fn split_by_balanced_blocks(blocks: &[TextBlock]) -> Vec<Chapter> {
-    let total_chars: usize = blocks
-        .iter()
-        .map(|block| block.text.chars().count())
-        .sum();
+    let total_chars: usize = blocks.iter().map(|block| block.text.chars().count()).sum();
 
     // Для небольшого текста одна глава.
     if total_chars < MIN_CHAPTER_CHARS * 2 {
@@ -567,10 +513,7 @@ fn split_by_balanced_blocks(blocks: &[TextBlock]) -> Vec<Chapter> {
 }
 
 fn split_by_target_size(blocks: &[TextBlock]) -> Vec<Chapter> {
-    let total_chars: usize = blocks
-        .iter()
-        .map(|block| block.text.chars().count())
-        .sum();
+    let total_chars: usize = blocks.iter().map(|block| block.text.chars().count()).sum();
 
     if total_chars <= TARGET_CHAPTER_CHARS {
         return vec![Chapter {
@@ -641,9 +584,6 @@ fn blocks_to_html(blocks: &[TextBlock]) -> String {
 
     html
 }
-
-
-
 
 /// Converts plain text into safe, readable HTML.
 ///
@@ -722,8 +662,6 @@ pub fn escape_html(text: &str) -> String {
     result
 }
 
-
-
 use std::path::Path;
 
 pub fn fallback_title(path: &Path, text: Option<String>) -> String {
@@ -745,10 +683,7 @@ pub fn fallback_title(path: &Path, text: Option<String>) -> String {
 
 fn title_from_text(text: &str) -> Option<String> {
     for line in text.lines() {
-        let line = line
-            .trim()
-            .trim_start_matches('\u{FEFF}')
-            .trim();
+        let line = line.trim().trim_start_matches('\u{FEFF}').trim();
 
         if line.is_empty() {
             continue;
@@ -795,23 +730,8 @@ fn title_from_filename(path: &Path) -> Option<String> {
         .collect::<Vec<_>>()
         .join(" ");
 
-    if title.is_empty() {
-        None
-    } else {
-        Some(title)
-    }
+    if title.is_empty() { None } else { Some(title) }
 }
-
-pub fn ensure_newline(result: &mut String) {
-    if result.is_empty() {
-        return;
-    }
-
-    if !result.ends_with('\n') {
-        result.push('\n');
-    }
-}
-
 
 pub fn decode_text(bytes: &[u8]) -> String {
     if let Ok(text) = std::str::from_utf8(bytes) {
@@ -829,7 +749,6 @@ pub fn decode_text(bytes: &[u8]) -> String {
     normalize_text(&text)
 }
 
-
 pub fn normalize_text(text: &str) -> String {
     text.replace("\r\n", "\n")
         .replace('\r', "\n")
@@ -839,7 +758,6 @@ pub fn normalize_text(text: &str) -> String {
         .collect::<Vec<_>>()
         .join("\n\n")
 }
-
 
 pub fn normalize_whitespace(text: &str) -> String {
     text.replace("\r\n", "\n")
