@@ -7,8 +7,8 @@ mod formats;
 mod utils;
 
 pub use error::Error;
-pub use parser::{DocumentParser, Loader, ParseOptions};
+pub use parser::{DocumentParser, Loader, ParseOptions, ContentType, ImageLoadType};
 
 pub mod prelude {
-    pub use crate::{DocumentParser, ParseOptions};
+    pub use crate::{DocumentParser, Loader, ParseOptions, ContentType, ImageLoadType};
 }
