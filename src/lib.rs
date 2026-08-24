@@ -8,6 +8,7 @@ mod utils;
 
 pub use error::Error;
 pub use parser::{DocumentParser, Loader, ParseOptions, ContentType, ImageLoadType};
+pub use model::{Chapter, ChapterContent, Content, Document, Metadata};
 
 pub mod prelude {
     pub use crate::{DocumentParser, Loader, ParseOptions, ContentType, ImageLoadType};
