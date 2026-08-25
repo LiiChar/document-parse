@@ -5,32 +5,41 @@ use regex::Regex;
 
 use crate::model::{Chapter, ChapterContent};
 
-const MIN_CHAPTER_CHARS: usize = 800;
-const TARGET_CHAPTER_CHARS: usize = 12_000;
-const MAX_CHAPTER_CHARS: usize = 18_000;
-const MIN_TITLE_LENGTH: usize = 2;
 const MAX_TITLE_LENGTH: usize = 120;
-
-#[derive(Debug, Clone)]
-struct TextBlock {
-    text: String,
-}
+const MAX_TITLE_WORDS: usize = 15;
 
 #[derive(Debug, Clone)]
 struct ChapterBoundary {
-    block_index: usize,
+    line_index: usize,
     title: String,
 }
 
-/// Разделяет обычный текстовый файл на главы.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HeadingKind {
+    Roman,
+    Numbered,
+    Explicit,
+    Part,
+    Special,
+}
+
+/// Разделяет TXT-документ на главы.
 ///
-/// Алгоритм:
-/// 1. Нормализация текста.
-/// 2. Поиск явных заголовков.
-/// 3. Поиск вероятных заголовков по эвристике.
-/// 4. Если заголовков нет — fallback-разбиение по абзацам.
-/// 5. Если текст представляет собой одну длинную простыню —
-///    разбиение по целевому количеству символов.
+/// Основной принцип:
+/// - TXT не имеет надёжной структуры, поэтому нельзя агрессивно
+///   считать любую короткую строку заголовком.
+/// - Приоритет имеют явные конструкции:
+///
+///     Глава I. Название
+///     Глава 1. Название
+///     I. Название
+///     1. Название
+///     Часть первая
+///     Chapter 1
+///
+/// - Обычные предложения и реплики никогда не считаются главами.
+/// - Если структура глав не подтверждается несколькими заголовками,
+///   весь документ остаётся одной главой.
 pub fn split_into_chapters(text: &str) -> Vec<Chapter> {
     let text = normalize_source_text(text);
 
@@ -38,249 +47,543 @@ pub fn split_into_chapters(text: &str) -> Vec<Chapter> {
         return Vec::new();
     }
 
-    let blocks = split_into_blocks(&text);
+    let lines: Vec<&str> = text.lines().collect();
 
-    if blocks.is_empty() {
+    if lines.is_empty() {
         return Vec::new();
     }
 
-    // Сначала ищем реальные заголовки.
-    let boundaries = detect_chapter_boundaries(&blocks);
+    let boundaries = detect_chapter_boundaries(&lines);
 
-    if !boundaries.is_empty() {
-        let chapters = build_chapters_from_boundaries(&blocks, &boundaries);
-
-        if !chapters.is_empty() {
-            return chapters;
-        }
+    if boundaries.is_empty() {
+        return vec![Chapter {
+            title: None,
+            content: ChapterContent::Html(text_to_html(&text)),
+        }];
     }
 
-    // Если заголовки не обнаружены —
-    // пробуем разделить книгу эвристически.
-    split_without_headings(&blocks)
+    build_chapters_from_boundaries(&lines, &boundaries)
 }
 
-fn normalize_source_text(text: &str) -> String {
-    text.trim_start_matches('\u{FEFF}')
-        .replace("\r\n", "\n")
-        .replace('\r', "\n")
-        .replace(['\u{00A0}', '\t'], " ")
-}
+/* -------------------------------------------------------------------------- */
+/* Chapter detection                                                          */
+/* -------------------------------------------------------------------------- */
 
-fn split_into_blocks(text: &str) -> Vec<TextBlock> {
-    let mut blocks = Vec::new();
-    let mut current_lines = Vec::new();
+fn detect_chapter_boundaries(lines: &[&str]) -> Vec<ChapterBoundary> {
+    let mut candidates = Vec::new();
 
-    for raw_line in text.lines() {
-        let line = raw_line.trim();
+    for (index, raw_line) in lines.iter().enumerate() {
+        let line = normalize_heading_line(raw_line);
 
         if line.is_empty() {
-            if !current_lines.is_empty() {
-                let block = current_lines.join(" ");
-
-                if !block.trim().is_empty() {
-                    blocks.push(TextBlock {
-                        text: normalize_block_text(&block),
-                    });
-                }
-
-                current_lines.clear();
-            }
-
             continue;
         }
 
-        current_lines.push(line.to_string());
+        let Some((title, kind)) = detect_title(&line) else {
+            continue;
+        };
+
+        candidates.push((index, title, kind));
     }
 
-    if !current_lines.is_empty() {
-        let block = current_lines.join(" ");
+    if candidates.is_empty() {
+        return Vec::new();
+    }
 
-        if !block.trim().is_empty() {
-            blocks.push(TextBlock {
-                text: normalize_block_text(&block),
+    /*
+     * Самая важная часть алгоритма.
+     *
+     * Один случайный "I. ..." ничего не значит.
+     *
+     * Для настоящей книги обычно встречается последовательность:
+     *
+     * I. ...
+     * II. ...
+     * III. ...
+     * IV. ...
+     *
+     * Поэтому мы сначала ищем устойчивую структуру.
+     */
+
+    let mut confirmed = Vec::new();
+
+    for (position, candidate) in candidates.iter().enumerate() {
+        let (index, title, kind) = candidate;
+
+        let previous = candidates.get(position.wrapping_sub(1));
+        let next = candidates.get(position + 1);
+
+        let previous_compatible = previous
+            .map(|(_, _, previous_kind)| compatible_heading_kinds(*previous_kind, *kind))
+            .unwrap_or(false);
+
+        let next_compatible = next
+            .map(|(_, _, next_kind)| compatible_heading_kinds(*next_kind, *kind))
+            .unwrap_or(false);
+
+        let has_structure = previous_compatible || next_compatible;
+
+        /*
+         * Явные "Глава N" считаем достаточно надёжными сами по себе.
+         *
+         * А вот:
+         *
+         * "Потом он крикнул:"
+         * "– Он скончался."
+         *
+         * сюда не попадут вообще.
+         */
+        let strong = matches!(
+            kind,
+            HeadingKind::Explicit | HeadingKind::Part | HeadingKind::Special
+        );
+
+        if strong || has_structure {
+            confirmed.push(ChapterBoundary {
+                line_index: *index,
+                title: title.clone(),
             });
         }
     }
 
-    blocks
-}
+    /*
+     * Для римских/числовых заголовков дополнительно проверяем,
+     * что есть хотя бы две главы.
+     *
+     * Это очень важный фильтр против случайных:
+     *
+     * XIII. Что-то
+     *
+     * внутри обычного текста.
+     */
+    if confirmed.len() < 2 {
+        let strong_count = candidates
+            .iter()
+            .filter(|(_, _, kind)| {
+                matches!(
+                    kind,
+                    HeadingKind::Explicit | HeadingKind::Part | HeadingKind::Special
+                )
+            })
+            .count();
 
-fn normalize_block_text(text: &str) -> String {
-    text.split_whitespace().collect::<Vec<_>>().join(" ")
-}
+        if strong_count == 0 {
+            return Vec::new();
+        }
+    }
 
-fn detect_chapter_boundaries(blocks: &[TextBlock]) -> Vec<ChapterBoundary> {
+    /*
+     * Убираем дубликаты.
+     */
     let mut result = Vec::new();
-    let mut previous_title: Option<String> = None;
 
-    for (index, block) in blocks.iter().enumerate() {
-        let Some(title) = detect_title(block, blocks, index) else {
-            continue;
-        };
-
-        // Не допускаем один и тот же заголовок подряд.
-        if previous_title.as_deref() == Some(title.as_str()) {
+    for boundary in confirmed {
+        if result
+            .last()
+            .map(|last: &ChapterBoundary| last.line_index == boundary.line_index)
+            .unwrap_or(false)
+        {
             continue;
         }
 
-        previous_title = Some(title.clone());
-
-        result.push(ChapterBoundary {
-            block_index: index,
-            title,
-        });
+        result.push(boundary);
     }
 
-    // Первый найденный заголовок должен быть достаточно рано.
-    // Иначе это может быть просто строка внутри обычного текста.
+    /*
+     * Если первая глава начинается слишком далеко от начала,
+     * скорее всего найден случайный заголовок.
+     *
+     * Но допускаем большой preface / аннотацию.
+     */
     if let Some(first) = result.first() {
-        if first.block_index > blocks.len() / 3 {
-            return Vec::new();
+        let non_empty_lines = lines.iter().filter(|line| !line.trim().is_empty()).count();
+
+        if non_empty_lines > 20 {
+            let first_position = lines[..first.line_index]
+                .iter()
+                .filter(|line| !line.trim().is_empty())
+                .count();
+
+            /*
+             * Если больше 60% книги прошло до первого заголовка —
+             * это почти наверняка ложное распознавание.
+             */
+            if first_position > non_empty_lines * 6 / 10 {
+                return Vec::new();
+            }
         }
     }
 
     result
 }
 
-fn detect_title(block: &TextBlock, blocks: &[TextBlock], index: usize) -> Option<String> {
-    let text = block.text.trim();
+fn compatible_heading_kinds(a: HeadingKind, b: HeadingKind) -> bool {
+    match (a, b) {
+        (HeadingKind::Roman, HeadingKind::Roman) => true,
+        (HeadingKind::Numbered, HeadingKind::Numbered) => true,
 
-    if text.len() < MIN_TITLE_LENGTH || text.len() > MAX_TITLE_LENGTH {
+        /*
+         * Некоторые книги имеют:
+         *
+         * Часть первая
+         * I. ...
+         *
+         * поэтому Part/Explicit можем связывать с numbered/roman.
+         */
+        (HeadingKind::Part, HeadingKind::Part) => true,
+        (HeadingKind::Part, HeadingKind::Roman)
+        | (HeadingKind::Roman, HeadingKind::Part)
+        | (HeadingKind::Part, HeadingKind::Numbered)
+        | (HeadingKind::Numbered, HeadingKind::Part) => true,
+
+        (HeadingKind::Explicit, HeadingKind::Explicit) => true,
+
+        _ => false,
+    }
+}
+
+fn detect_title(text: &str) -> Option<(String, HeadingKind)> {
+    let text = normalize_heading_line(text);
+
+    if text.is_empty() {
         return None;
     }
 
-    // Слишком длинная строка почти наверняка не заголовок.
-    let word_count = text.split_whitespace().count();
-
-    if word_count > 15 {
+    if text.chars().count() > MAX_TITLE_LENGTH {
         return None;
     }
 
-    // Явные названия глав имеют максимальный приоритет.
-    if is_explicit_chapter_title(text) {
-        return Some(clean_title(text));
+    if text.split_whitespace().count() > MAX_TITLE_WORDS {
+        return None;
     }
 
-    let mut score = 0;
-
-    // Короткая строка.
-    if text.len() <= 80 {
-        score += 1;
+    /*
+     * Важный фильтр:
+     *
+     * Заголовок не должен быть репликой.
+     */
+    if looks_like_dialogue(&text) {
+        return None;
     }
 
-    // Очень короткая строка характерна для title.
-    if text.len() <= 50 {
-        score += 1;
-    }
-
-    // Нет финальной пунктуации.
-    if !ends_with_sentence_punctuation(text) {
-        score += 1;
-    }
-
-    // Заголовок часто не заканчивается точкой.
-    if !text.ends_with('.') {
-        score += 1;
-    }
-
-    // Title Case.
-    if is_title_case(text) {
-        score += 2;
-    }
-
-    // Все буквы заглавные.
-    if is_all_caps(text) {
-        score += 2;
-    }
-
-    // Содержит номер в начале.
-    if starts_with_number(text) {
-        score += 3;
-    }
-
-    // Римская цифра в начале.
-    if starts_with_roman_number(text) {
-        score += 3;
-    }
-
-    // Строка находится между пустыми блоками —
-    // в нашем представлении каждый block уже отделён пустой строкой,
-    // поэтому дополнительно смотрим на соседние блоки.
-    if index > 0 && index + 1 < blocks.len() {
-        let prev_len = blocks[index - 1].text.len();
-        let next_len = blocks[index + 1].text.len();
-
-        // Заголовок обычно короткий, а соседние блоки длиннее.
-        if text.len() * 3 < prev_len.max(next_len) {
-            score += 2;
-        }
-
-        if prev_len > 200 {
-            score += 1;
-        }
-
-        if next_len > 200 {
-            score += 1;
+    /*
+     * И не должен выглядеть как обычное предложение.
+     */
+    if looks_like_sentence(&text) {
+        /*
+         * Исключение:
+         *
+         * "Глава I. Что случилось?"
+         *
+         * Это всё ещё заголовок.
+         */
+        if !is_explicit_heading(&text) {
+            return None;
         }
     }
 
-    // Слишком похожа на обычное предложение.
-    if looks_like_sentence(text) {
-        score -= 3;
+    if let Some(title) = parse_explicit_heading(&text) {
+        return Some((title, HeadingKind::Explicit));
     }
 
-    if score >= 5 {
+    if let Some(title) = parse_part_heading(&text) {
+        return Some((title, HeadingKind::Part));
+    }
+
+    if let Some(title) = parse_roman_heading(&text) {
+        return Some((title, HeadingKind::Roman));
+    }
+
+    if let Some(title) = parse_numbered_heading(&text) {
+        return Some((title, HeadingKind::Numbered));
+    }
+
+    if is_special_heading(&text) {
+        return Some((clean_title(&text), HeadingKind::Special));
+    }
+
+    None
+}
+
+/* -------------------------------------------------------------------------- */
+/* Explicit headings                                                          */
+/* -------------------------------------------------------------------------- */
+
+fn parse_explicit_heading(text: &str) -> Option<String> {
+    static RE: OnceLock<Regex> = OnceLock::new();
+
+    let re = RE.get_or_init(|| {
+        Regex::new(
+            r"(?iu)^\s*\
+            (?:chapter|chap\.?|глава|гл\.?)\
+            \s+\
+            (?:\d{1,4}|[ivxlcdm]{1,8}|[a-zа-яё]+)\
+            (?:\s*[\.\-:)]\s*|\s+)\
+            (.+?)\
+            \s*$",
+        )
+        .expect("valid explicit heading regex")
+    });
+
+    let captures = re.captures(text)?;
+
+    let title = captures.get(0)?.as_str();
+
+    Some(clean_title(title))
+}
+
+fn is_explicit_heading(text: &str) -> bool {
+    static RE: OnceLock<Regex> = OnceLock::new();
+
+    let re = RE.get_or_init(|| {
+        Regex::new(
+            r"(?iu)^\s*(?:chapter|chap\.?|глава|гл\.?)\s+(?:\d{1,4}|[ivxlcdm]{1,8}|[a-zа-яё]+)",
+        )
+        .expect("valid explicit heading detection regex")
+    });
+
+    re.is_match(text)
+}
+
+/* -------------------------------------------------------------------------- */
+/* Part headings                                                              */
+/* -------------------------------------------------------------------------- */
+
+fn parse_part_heading(text: &str) -> Option<String> {
+    static RE: OnceLock<Regex> = OnceLock::new();
+
+    let re = RE.get_or_init(|| {
+        Regex::new(
+            r"(?iu)^\s*(?:part|часть|book|книга|section|раздел|секция)\
+            \s+(?:\d{1,4}|[ivxlcdm]{1,8}|[a-zа-яё]+)\
+            (?:\s*[\.\-:)]\s*.*)?$",
+        )
+        .expect("valid part heading regex")
+    });
+
+    if re.is_match(text) {
         Some(clean_title(text))
     } else {
         None
     }
 }
 
-fn is_explicit_chapter_title(text: &str) -> bool {
-    static EXPLICIT: OnceLock<Vec<Regex>> = OnceLock::new();
+/* -------------------------------------------------------------------------- */
+/* Roman headings                                                             */
+/* -------------------------------------------------------------------------- */
 
-    let patterns = EXPLICIT.get_or_init(|| {
-        vec![
-            Regex::new(
-                r"(?i)^(chapter|chap\.?|глава|гл\.?)\s+([0-9]{1,4}|[ivxlcdm]+|[a-zа-яё]+)\b.*$",
-            )
-            .unwrap(),
-            Regex::new(r"(?i)^(part|часть)\s+([0-9]{1,4}|[ivxlcdm]+|[a-zа-яё]+)\b.*$").unwrap(),
-            Regex::new(r"(?i)^(book|книга)\s+([0-9]{1,4}|[ivxlcdm]+|[a-zа-яё]+)\b.*$").unwrap(),
-            Regex::new(r"(?i)^(section|section\.|секция|раздел)\s+([0-9]{1,4}|[ivxlcdm]+)\b.*$")
-                .unwrap(),
-            Regex::new(r"(?i)^(prologue|epilogue|introduction|foreword|afterword|appendix)$")
-                .unwrap(),
-            Regex::new(r"(?i)^(пролог|эпилог|введение|предисловие|послесловие|приложение)$")
-                .unwrap(),
-            Regex::new(
-                r"(?i)^(пролог|эпилог|введение|предисловие|послесловие|приложение)\s*[:\-—]?.*$",
-            )
-            .unwrap(),
-        ]
-    });
-
-    patterns.iter().any(|pattern| pattern.is_match(text))
-}
-
-fn starts_with_number(text: &str) -> bool {
-    static RE: OnceLock<Regex> = OnceLock::new();
-
-    let re =
-        RE.get_or_init(|| Regex::new(r"^\s*(?:chapter\s+)?\d{1,4}(?:\s*[\.\-:)]|\s+|$)").unwrap());
-
-    re.is_match(text)
-}
-
-fn starts_with_roman_number(text: &str) -> bool {
+fn parse_roman_heading(text: &str) -> Option<String> {
     static RE: OnceLock<Regex> = OnceLock::new();
 
     let re = RE.get_or_init(|| {
-        Regex::new(r"(?i)^\s*(?:chapter|глава)?\s*[ivxlcdm]{1,8}(?:\s*[\.\-:)]|\s+|$)").unwrap()
+        Regex::new(
+            r"(?iu)^\s*
+            (?P<number>[ivxlcdm]{1,8})
+            \s*[\.\-:)]
+            \s+
+            (?P<title>[^\d].{1,119})
+            $",
+        )
+        .expect("valid roman heading regex")
+    });
+
+    let captures = re.captures(text)?;
+
+    let title = captures.name("title")?.as_str().trim();
+
+    if title.is_empty() || looks_like_sentence(title) {
+        return None;
+    }
+
+    /*
+     * "I. Марсель. Прибытие" — OK
+     *
+     * "I. Это было ..." — может быть обычный текст,
+     * поэтому дополнительно запрещаем полноценные предложения.
+     */
+    if looks_like_sentence(title) {
+        return None;
+    }
+
+    Some(clean_title(text))
+}
+
+/* -------------------------------------------------------------------------- */
+/* Numeric headings                                                           */
+/* -------------------------------------------------------------------------- */
+
+fn parse_numbered_heading(text: &str) -> Option<String> {
+    static RE: OnceLock<Regex> = OnceLock::new();
+
+    let re = RE.get_or_init(|| {
+        Regex::new(
+            r"(?iu)^\s*(?P<number>\d{1,4})\s*[\.\-:)]\s+(?P<title>[^\d].{1,119})$",
+        )
+        .expect("valid numbered heading regex")
+    });
+
+    let captures = re.captures(text)?;
+
+    let title = captures.name("title")?.as_str().trim();
+
+    if title.is_empty() || looks_like_sentence(title) {
+        return None;
+    }
+
+    Some(clean_title(text))
+}
+
+/* -------------------------------------------------------------------------- */
+/* Special headings                                                           */
+/* -------------------------------------------------------------------------- */
+
+fn is_special_heading(text: &str) -> bool {
+    static RE: OnceLock<Regex> = OnceLock::new();
+
+    let re = RE.get_or_init(|| {
+        Regex::new(
+            r"(?iu)^\s*
+            (?:пролог|эпилог|введение|предисловие|послесловие|приложение|
+               prologue|epilogue|introduction|foreword|afterword|appendix)
+            (?:\s*[:\-—].*)?
+            \s*$",
+        )
+        .expect("valid special heading regex")
     });
 
     re.is_match(text)
+}
+
+/* -------------------------------------------------------------------------- */
+/* Text heuristics                                                            */
+/* -------------------------------------------------------------------------- */
+
+fn looks_like_dialogue(text: &str) -> bool {
+    let trimmed = text.trim_start();
+
+    /*
+     * Русские тире:
+     *
+     * – А!
+     * — Что случилось?
+     *
+     * Никогда не считаем это заголовком.
+     */
+    trimmed.starts_with('–')
+        || trimmed.starts_with('—')
+        || trimmed.starts_with('-')
+        || trimmed.starts_with('―')
+}
+
+fn looks_like_sentence(text: &str) -> bool {
+    let text = text.trim();
+
+    if text.is_empty() {
+        return false;
+    }
+
+    /*
+     * Явная пунктуация конца предложения.
+     */
+    if text.ends_with('.')
+        || text.ends_with('!')
+        || text.ends_with('?')
+        || text.ends_with('…')
+        || text.ends_with(';')
+    {
+        return true;
+    }
+
+    let words = text.split_whitespace().count();
+
+    /*
+     * Очень короткие заголовки:
+     *
+     * "Марсель"
+     * "Предисловие"
+     * "Признание"
+     *
+     * не должны попадать сюда.
+     */
+    if words <= 3 {
+        return false;
+    }
+
+    /*
+     * Для длинной строки вероятность того, что это обычное
+     * предложение, резко возрастает.
+     */
+    if words >= 10 {
+        return true;
+    }
+
+    let lower = text.to_lowercase();
+
+    /*
+     * Частые русские конструкции обычного предложения.
+     */
+    let russian_sentence_markers = [
+        " и ",
+        " а ",
+        " но ",
+        " это ",
+        " был ",
+        " была ",
+        " были ",
+        " будет ",
+        " будут ",
+        " есть ",
+        " его ",
+        " её ",
+        " они ",
+        " она ",
+        " он ",
+        " мы ",
+        " вы ",
+        " я ",
+        " мне ",
+        " ему ",
+        " ей ",
+        " когда ",
+        " потому ",
+        " чтобы ",
+        " который ",
+        " которая ",
+        " которые ",
+    ];
+
+    if russian_sentence_markers
+        .iter()
+        .any(|marker| lower.contains(marker))
+    {
+        return true;
+    }
+
+    /*
+     * Английские конструкции.
+     */
+    let english_sentence_markers = [
+        " and ",
+        " but ",
+        " this ",
+        " that ",
+        " was ",
+        " were ",
+        " have ",
+        " has ",
+        " had ",
+        " will ",
+        " when ",
+        " which ",
+        " who ",
+        " they ",
+        " he ",
+        " she ",
+    ];
+
+    english_sentence_markers
+        .iter()
+        .any(|marker| lower.contains(marker))
 }
 
 fn is_title_case(text: &str) -> bool {
@@ -290,8 +593,8 @@ fn is_title_case(text: &str) -> bool {
         return false;
     }
 
-    let mut meaningful_words = 0;
-    let mut title_case_words = 0;
+    let mut meaningful = 0;
+    let mut uppercase = 0;
 
     for word in words {
         let clean = word.trim_matches(|c: char| !c.is_alphabetic());
@@ -300,16 +603,19 @@ fn is_title_case(text: &str) -> bool {
             continue;
         }
 
-        meaningful_words += 1;
+        meaningful += 1;
 
-        if let Some(first) = clean.chars().next() {
-            if first.is_uppercase() {
-                title_case_words += 1;
-            }
+        if clean
+            .chars()
+            .next()
+            .map(|c| c.is_uppercase())
+            .unwrap_or(false)
+        {
+            uppercase += 1;
         }
     }
 
-    meaningful_words > 0 && title_case_words as f32 / meaningful_words as f32 >= 0.6
+    meaningful > 0 && uppercase as f32 / meaningful as f32 >= 0.6
 }
 
 fn is_all_caps(text: &str) -> bool {
@@ -322,283 +628,84 @@ fn is_all_caps(text: &str) -> bool {
     letters.iter().all(|c| !c.is_lowercase())
 }
 
-fn looks_like_sentence(text: &str) -> bool {
-    let words = text.split_whitespace().count();
-
-    if words < 4 {
-        return false;
-    }
-
-    let sentence_end =
-        text.ends_with('.') || text.ends_with('!') || text.ends_with('?') || text.ends_with('…');
-
-    if sentence_end {
-        return true;
-    }
-
-    // Есть типичный субъект + сказуемое.
-    // Это грубая эвристика, зато хорошо отсекает
-    // большинство обычных предложений.
-    let lower = text.to_lowercase();
-
-    lower.contains(" is ")
-        || lower.contains(" are ")
-        || lower.contains(" was ")
-        || lower.contains(" were ")
-        || lower.contains(" has ")
-        || lower.contains(" have ")
-        || lower.contains(" had ")
-        || lower.contains(" и ")
-        || lower.contains(" это ")
-        || lower.contains(" был ")
-        || lower.contains(" была ")
-        || lower.contains(" были ")
-        || lower.contains(" есть ")
-}
-
-fn ends_with_sentence_punctuation(text: &str) -> bool {
-    text.ends_with('.')
-        || text.ends_with('!')
-        || text.ends_with('?')
-        || text.ends_with('…')
-        || text.ends_with(';')
-}
-
-fn clean_title(text: &str) -> String {
-    text.trim()
-        .trim_matches(|c: char| matches!(c, '#' | '*' | '_' | '"' | '\'' | '“' | '”' | '«' | '»'))
-        .trim()
-        .to_string()
-}
+/* -------------------------------------------------------------------------- */
+/* Building chapters                                                          */
+/* -------------------------------------------------------------------------- */
 
 fn build_chapters_from_boundaries(
-    blocks: &[TextBlock],
+    lines: &[&str],
     boundaries: &[ChapterBoundary],
 ) -> Vec<Chapter> {
     let mut chapters = Vec::new();
 
     for (position, boundary) in boundaries.iter().enumerate() {
-        let start = boundary.block_index + 1;
+        let start = boundary.line_index + 1;
 
         let end = boundaries
             .get(position + 1)
-            .map(|next| next.block_index)
-            .unwrap_or(blocks.len());
+            .map(|next| next.line_index)
+            .unwrap_or(lines.len());
 
-        // Заголовок должен иметь хотя бы немного текста после себя.
         if start >= end {
             continue;
         }
 
-        let content_blocks = &blocks[start..end];
+        let content = lines[start..end].join("\n");
 
-        let html = blocks_to_html(content_blocks);
-
-        if html.trim().is_empty() {
+        if content.trim().is_empty() {
             continue;
         }
 
         chapters.push(Chapter {
             title: Some(boundary.title.clone()),
-            content: ChapterContent::Html(html),
+            content: ChapterContent::Html(text_to_html(&content)),
         });
     }
 
-    // Если перед первой главой был текст (например, посвящение),
-    // добавляем его как отдельную главу без title.
-    if let Some(first_boundary) = boundaries.first() {
-        if first_boundary.block_index > 0 {
-            let preface = &blocks[..first_boundary.block_index];
+    /*
+     * Текст до первой главы:
+     *
+     * Аннотация
+     * Автор
+     * Издательство
+     * ...
+     *
+     * оставляем отдельным preface.
+     */
+    if let Some(first) = boundaries.first() {
+        let preface = lines[..first.line_index].join("\n");
 
-            if !preface.is_empty() {
-                chapters.insert(
-                    0,
-                    Chapter {
-                        title: None,
-                        content: ChapterContent::Html(blocks_to_html(preface)),
-                    },
-                );
-            }
+        if !preface.trim().is_empty() {
+            chapters.insert(
+                0,
+                Chapter {
+                    title: Some("Annotation".to_string()),
+                    content: ChapterContent::Html(text_to_html(&preface)),
+                },
+            );
         }
     }
 
     chapters
 }
 
-fn split_without_headings(blocks: &[TextBlock]) -> Vec<Chapter> {
-    if blocks.len() <= 1 {
-        return vec![Chapter {
-            title: None,
-            content: ChapterContent::Html(blocks_to_html(blocks)),
-        }];
-    }
+/* -------------------------------------------------------------------------- */
+/* HTML                                                                       */
+/* -------------------------------------------------------------------------- */
 
-    // ------------------------------------------------------------
-    // Fallback №1:
-    // если текст состоит из хорошо разделённых крупных блоков,
-    // считаем каждый блок потенциальным разделом.
-    // ------------------------------------------------------------
-
-    let meaningful_blocks: Vec<&TextBlock> = blocks
-        .iter()
-        .filter(|block| block.text.chars().count() >= 100)
-        .collect();
-
-    if meaningful_blocks.len() >= 3 {
-        let total_chars: usize = blocks.iter().map(|block| block.text.chars().count()).sum();
-
-        let average = total_chars / blocks.len().max(1);
-
-        if average > 250 {
-            return split_by_balanced_blocks(blocks);
-        }
-    }
-
-    // ------------------------------------------------------------
-    // Fallback №2:
-    // длинный текст без абзацной структуры.
-    // Разрезаем примерно по TARGET_CHAPTER_CHARS,
-    // но только между блоками.
-    // ------------------------------------------------------------
-
-    split_by_target_size(blocks)
-}
-
-fn split_by_balanced_blocks(blocks: &[TextBlock]) -> Vec<Chapter> {
-    let total_chars: usize = blocks.iter().map(|block| block.text.chars().count()).sum();
-
-    // Для небольшого текста одна глава.
-    if total_chars < MIN_CHAPTER_CHARS * 2 {
-        return vec![Chapter {
-            title: None,
-            content: ChapterContent::Html(blocks_to_html(blocks)),
-        }];
-    }
-
-    // Стараемся получить 3–15k символов на часть.
-    let target = TARGET_CHAPTER_CHARS.min(total_chars.max(MIN_CHAPTER_CHARS));
-
-    let mut chapters = Vec::new();
-    let mut current = Vec::new();
-    let mut current_chars = 0;
-
-    for block in blocks {
-        let block_chars = block.text.chars().count();
-
-        if !current.is_empty()
-            && current_chars >= MIN_CHAPTER_CHARS
-            && current_chars + block_chars > target
-        {
-            chapters.push(Chapter {
-                title: None,
-                content: ChapterContent::Html(blocks_to_html(&current)),
-            });
-
-            current.clear();
-            current_chars = 0;
-        }
-
-        current.push(block.clone());
-        current_chars += block_chars;
-    }
-
-    if !current.is_empty() {
-        chapters.push(Chapter {
-            title: None,
-            content: ChapterContent::Html(blocks_to_html(&current)),
-        });
-    }
-
-    chapters
-}
-
-fn split_by_target_size(blocks: &[TextBlock]) -> Vec<Chapter> {
-    let total_chars: usize = blocks.iter().map(|block| block.text.chars().count()).sum();
-
-    if total_chars <= TARGET_CHAPTER_CHARS {
-        return vec![Chapter {
-            title: None,
-            content: ChapterContent::Html(blocks_to_html(blocks)),
-        }];
-    }
-
-    let mut chapters = Vec::new();
-
-    let mut current = Vec::new();
-    let mut current_chars = 0;
-
-    for block in blocks {
-        let block_chars = block.text.chars().count();
-
-        let should_split = !current.is_empty()
-            && current_chars >= MIN_CHAPTER_CHARS
-            && (current_chars + block_chars > TARGET_CHAPTER_CHARS
-                || current_chars >= MAX_CHAPTER_CHARS);
-
-        if should_split {
-            let order = chapters.len() + 1;
-
-            chapters.push(Chapter {
-                title: Some(format!("Part {}", order)),
-                content: ChapterContent::Html(blocks_to_html(&current)),
-            });
-
-            current.clear();
-            current_chars = 0;
-        }
-
-        current.push(block.clone());
-        current_chars += block_chars;
-    }
-
-    if !current.is_empty() {
-        let title = if chapters.is_empty() {
-            None
-        } else {
-            Some(format!("Part {}", chapters.len() + 1))
-        };
-
-        chapters.push(Chapter {
-            title,
-            content: ChapterContent::Html(blocks_to_html(&current)),
-        });
-    }
-
-    chapters
-}
-
-fn blocks_to_html(blocks: &[TextBlock]) -> String {
-    let mut html = String::new();
-
-    for block in blocks {
-        let text = escape_html(&block.text);
-
-        if text.is_empty() {
-            continue;
-        }
-
-        html.push_str("<p>");
-        html.push_str(&text);
-        html.push_str("</p>\n");
-    }
-
-    html
-}
-
-/// Converts plain text into safe, readable HTML.
-///
-/// Rules:
-/// - HTML entities are escaped.
-/// - Consecutive non-empty lines are grouped into paragraphs.
-/// - Single newlines inside a paragraph become `<br>`.
-/// - Empty lines separate paragraphs.
-/// - Whitespace is normalized.
-/// - UTF-8 text is preserved as-is.
 pub fn text_to_html(text: &str) -> String {
     let text = normalize_line_endings(text);
 
     if text.trim().is_empty() {
         return String::new();
+    }
+
+    /*
+     * Если TXT на самом деле содержит HTML,
+     * не экранируем его второй раз.
+     */
+    if looks_like_html(&text) {
+        return normalize_embedded_html(&text);
     }
 
     let mut html = String::new();
@@ -620,11 +727,32 @@ pub fn text_to_html(text: &str) -> String {
     html
 }
 
-fn normalize_line_endings(text: &str) -> String {
-    text.replace("\r\n", "\n")
-        .replace('\r', "\n")
-        .trim_start_matches('\u{FEFF}')
-        .to_string()
+fn normalize_embedded_html(text: &str) -> String {
+    let mut result = text.trim().to_string();
+
+    /*
+     * Убираем служебные HTML-обёртки.
+     */
+    result = strip_html_wrapper(&result, "html");
+    result = strip_html_wrapper(&result, "body");
+
+    result
+}
+
+fn strip_html_wrapper(text: &str, tag: &str) -> String {
+    let open = format!("<{tag}>");
+    let close = format!("</{tag}>");
+
+    let lower = text.to_lowercase();
+
+    if lower.starts_with(&open) && lower.ends_with(&close) {
+        let start = open.len();
+        let end = text.len() - close.len();
+
+        return text[start..end].trim().to_string();
+    }
+
+    text.to_string()
 }
 
 fn flush_paragraph(html: &mut String, lines: &mut Vec<&str>) {
@@ -662,49 +790,117 @@ pub fn escape_html(text: &str) -> String {
     result
 }
 
-use std::path::Path;
+/* -------------------------------------------------------------------------- */
+/* Normalization                                                              */
+/* -------------------------------------------------------------------------- */
 
-pub fn fallback_title(path: &Path, text: Option<String>) -> String {
-    // 1. Пытаемся найти заголовок в самом тексте.
+pub fn normalize_source_text(text: &str) -> String {
+    text.replace("\r\n", "\n")
+        .replace('\r', "\n")
+        .trim_start_matches('\u{FEFF}')
+        .to_string()
+}
+
+fn normalize_line_endings(text: &str) -> String {
+    text.replace("\r\n", "\n")
+        .replace('\r', "\n")
+        .trim_start_matches('\u{FEFF}')
+        .to_string()
+}
+
+fn normalize_heading_line(text: &str) -> String {
+    text.trim()
+        .trim_matches('\u{FEFF}')
+        .trim_matches(|c: char| c == '\u{200B}' || c == '\u{00A0}')
+        .trim()
+        .to_string()
+}
+
+/* -------------------------------------------------------------------------- */
+/* Encoding                                                                   */
+/* -------------------------------------------------------------------------- */
+
+pub fn decode_text(bytes: &[u8]) -> String {
+    /*
+     * UTF-8 — основной вариант.
+     */
+    if let Ok(text) = std::str::from_utf8(bytes) {
+        return normalize_source_text(text);
+    }
+
+    /*
+     * Windows-1251 — типичный вариант для русских TXT.
+     */
+    let (text, _, had_errors) = WINDOWS_1251.decode(bytes);
+
+    if !had_errors {
+        return normalize_source_text(&text);
+    }
+
+    /*
+     * Последний fallback.
+     */
+    normalize_source_text(&String::from_utf8_lossy(bytes))
+}
+
+/* -------------------------------------------------------------------------- */
+/* Book title                                                                  */
+/* -------------------------------------------------------------------------- */
+
+pub fn fallback_title(path: &std::path::Path, text: Option<String>) -> String {
+    /*
+     * Сначала пытаемся взять title из текста.
+     */
     if let Some(text) = text {
         if let Some(title) = title_from_text(&text) {
             return title;
         }
     }
 
-    // 2. Используем имя файла.
+    /*
+     * Потом имя файла.
+     */
     if let Some(title) = title_from_filename(path) {
         return title;
     }
 
-    // 3. Последний fallback.
     "Untitled".to_string()
 }
 
 fn title_from_text(text: &str) -> Option<String> {
-    for line in text.lines() {
-        let line = line.trim().trim_start_matches('\u{FEFF}').trim();
+    for raw_line in text.lines().take(30) {
+        let line = raw_line
+            .trim()
+            .trim_start_matches('\u{FEFF}')
+            .trim();
 
         if line.is_empty() {
             continue;
         }
 
-        // Слишком длинная строка почти наверняка является текстом,
-        // а не названием.
-        if line.chars().count() > 120 {
-            return None;
+        /*
+         * Не берём HTML-теги как название.
+         */
+        if line.starts_with('<') {
+            continue;
         }
 
-        // Заголовок обычно содержит небольшое количество слов.
+        if line.chars().count() > MAX_TITLE_LENGTH {
+            continue;
+        }
+
         let word_count = line.split_whitespace().count();
 
-        if !(1..=15).contains(&word_count) {
-            return None;
+        if !(1..=10).contains(&word_count) {
+            continue;
         }
 
-        // Обычное длинное предложение не считаем заголовком.
+        if looks_like_dialogue(line) {
+            continue;
+        }
+
         if looks_like_sentence(line) {
-            return None;
+            continue;
         }
 
         let title = clean_title(line);
@@ -717,61 +913,66 @@ fn title_from_text(text: &str) -> Option<String> {
     None
 }
 
-fn title_from_filename(path: &Path) -> Option<String> {
+fn title_from_filename(path: &std::path::Path) -> Option<String> {
     let stem = path.file_stem()?.to_str()?.trim();
 
     if stem.is_empty() {
         return None;
     }
 
+    /*
+     * avidreaders.ru__graf-monte-kristo
+     *
+     * ->
+     *
+     * avidreaders.ru graf monte kristo
+     */
     let title = stem
+        .replace("__", " — ")
         .replace(['_', '-'], " ")
         .split_whitespace()
         .collect::<Vec<_>>()
         .join(" ");
 
-    if title.is_empty() { None } else { Some(title) }
-}
-
-pub fn decode_text(bytes: &[u8]) -> String {
-    if let Ok(text) = std::str::from_utf8(bytes) {
-        return normalize_text(text);
+    if title.is_empty() {
+        None
+    } else {
+        Some(title)
     }
-
-    let (text, _, had_errors) = WINDOWS_1251.decode(bytes);
-
-    if !had_errors {
-        return normalize_text(&text);
-    }
-
-    let text = String::from_utf8_lossy(bytes);
-
-    normalize_text(&text)
 }
 
-pub fn normalize_text(text: &str) -> String {
-    text.replace("\r\n", "\n")
-        .replace('\r', "\n")
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .collect::<Vec<_>>()
-        .join("\n\n")
-}
-
-pub fn normalize_whitespace(text: &str) -> String {
-    text.replace("\r\n", "\n")
-        .replace('\r', "\n")
-        .split("\n\n")
-        .map(|paragraph| {
-            paragraph
-                .lines()
-                .map(str::trim)
-                .filter(|line| !line.is_empty())
-                .collect::<Vec<_>>()
-                .join(" ")
+fn clean_title(text: &str) -> String {
+    text.trim()
+        .trim_matches(|c: char| {
+            matches!(
+                c,
+                '#' | '*'
+                    | '_'
+                    | '"'
+                    | '\''
+                    | '“'
+                    | '”'
+                    | '«'
+                    | '»'
+                    | ' '
+                    | '\t'
+            )
         })
-        .filter(|paragraph| !paragraph.is_empty())
-        .collect::<Vec<_>>()
-        .join("\n\n")
+        .trim()
+        .to_string()
+}
+
+/* -------------------------------------------------------------------------- */
+/* HTML detection                                                             */
+/* -------------------------------------------------------------------------- */
+
+fn looks_like_html(text: &str) -> bool {
+    static RE: OnceLock<Regex> = OnceLock::new();
+
+    let re = RE.get_or_init(|| {
+        Regex::new(r"(?is)<(?:p|div|br|h[1-6]|body|html)(?:\s[^>]*)?>")
+            .expect("valid html detection regex")
+    });
+
+    re.is_match(text)
 }

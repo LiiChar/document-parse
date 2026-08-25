@@ -15,10 +15,7 @@ use xmltree::Element;
 use zip::ZipArchive;
 
 use crate::{
-    error::Error,
-    model::{RawChapter, RawDocument, RawMetadata, RawResource},
-    parser::{Loader, ParseOptions},
-    utils::text::{escape_html, normalize_text},
+    error::Error, model::{RawChapter, RawDocument, RawMetadata, RawResource}, parser::{Loader, ParseOptions}, utils::text::{escape_html, normalize_source_text},
 };
 
 pub struct DocxLoader;
@@ -371,7 +368,7 @@ fn process_paragraph<R: Read + Seek>(
         }
     }
 
-    let plain_text = normalize_text(&paragraph.text());
+    let plain_text = normalize_source_text(&paragraph.text());
 
     Ok((html, heading_level, list_info, plain_text))
 }
@@ -561,7 +558,7 @@ fn process_hyperlink<R: Read + Seek>(
     if let Some(run) = &link.content {
         inner.push_str(&process_run(run, archive, docx, resource_ids)?);
     } else {
-        let text = normalize_text(&link.text());
+        let text = normalize_source_text(&link.text());
 
         if !text.is_empty() {
             inner.push_str(&escape_html(&text));
@@ -655,7 +652,7 @@ fn read_xml<R: Read + Seek>(archive: &mut ZipArchive<R>, path: &str) -> Result<E
 }
 
 fn is_chapter_title(text: &str) -> bool {
-    let normalized = normalize_text(text);
+    let normalized = normalize_source_text(text);
 
     if normalized.is_empty() {
         return false;

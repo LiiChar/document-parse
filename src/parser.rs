@@ -18,7 +18,7 @@ use crate::{
         html::{html_to_text, normalize_html_whitespace, sanitize_html},
         id::generate_id,
         language::detect_document_language,
-        text::{fallback_title, normalize_whitespace},
+        text::{fallback_title},
     },
 };
 
@@ -202,11 +202,11 @@ impl DocumentParser {
             ContentType::Text => {
                 let text = html_to_text(&html);
 
-                let text = if self.options.normalize_whitespace {
-                    normalize_whitespace(&text)
-                } else {
-                    text
-                };
+                // let text = if self.options.normalize_whitespace {
+                //     normalize_whitespace(&text)
+                // } else {
+                //     text
+                // };
 
                 ChapterContent::Text(text)
             }
