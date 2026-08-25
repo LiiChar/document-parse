@@ -1,7 +1,7 @@
 [package]
 name = "document-parser"
-version = "0.1.0-alpha.12"
-edition = "2024"
+version = "0.1.0-alpha.13"
+edition = "2026"
 rust-version = "1.85"
 
 description = "A pure-Rust document parsing library for extracting normalized HTML and text from books and documents."
