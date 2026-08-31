@@ -9,8 +9,9 @@ use base64::{Engine, engine::general_purpose::STANDARD as BASE64};
 use crate::{
     error::Error,
     formats::{
-        cbz::CbzLoader, docx::DocxLoader, epub::EpubLoader, fb2::Fb2Loader, html::HtmlLoader,
-        markdown::MarkdownLoader, mobi::MobiLoader, pdf::PdfLoader, rtf::RtfLoader, txt::TxtLoader,
+        cbz::CbzLoader, djvu::loader::DjvuLoader, docx::DocxLoader, epub::EpubLoader,
+        fb2::Fb2Loader, html::HtmlLoader, markdown::MarkdownLoader, mobi::MobiLoader,
+        pdf::PdfLoader, rtf::RtfLoader, txt::TxtLoader,
     },
     model::{Chapter, ChapterContent, Content, Document, Metadata, RawDocument, RawResource},
     utils::{
@@ -18,7 +19,7 @@ use crate::{
         html::{html_to_text, normalize_html_whitespace, sanitize_html},
         id::generate_id,
         language::detect_document_language,
-        text::{fallback_title},
+        text::fallback_title,
     },
 };
 
@@ -101,6 +102,8 @@ impl DocumentParser {
             Box::new(MobiLoader),
             #[cfg(feature = "pdf")]
             Box::new(PdfLoader),
+            #[cfg(feature = "djvu")]
+            Box::new(DjvuLoader),
         ];
 
         Self {
@@ -109,12 +112,12 @@ impl DocumentParser {
         }
     }
 
-    pub fn with_options(mut self, options: ParseOptions) -> Self {
+    pub fn with_options(&mut self, options: ParseOptions) -> &mut Self {
         self.options = options;
         self
     }
 
-    pub fn register_loader(mut self, loader: impl Loader + 'static) -> Self {
+    pub fn register_loader(&mut self, loader: impl Loader + 'static) -> &mut Self {
         self.loaders.push(Box::new(loader));
         self
     }

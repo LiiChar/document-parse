@@ -27,3 +27,6 @@ pub mod mobi;
 
 #[cfg(feature = "pdf")]
 pub mod pdf;
+
+#[cfg(feature = "djvu")]
+pub mod djvu;

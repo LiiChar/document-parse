@@ -45,7 +45,7 @@ full = [
     "docx",
     "mobi",
     "pdf",
-    "scanner",
+    "djvu"
 ]
 
 # ------------------------------------------------------------
@@ -99,6 +99,10 @@ mobi = [
 
 pdf = [
     "dep:pdf-extract",
+]
+
+djvu = [
+    "dep:djvu"
 ]
 
 # ------------------------------------------------------------
@@ -163,6 +167,8 @@ docx-rust = { version = "0.1.11", optional = true }
 
 mobi = { version = "0.8.0", optional = true }
 
+djvu = { version = "0.1.0", optional = true }
+
 natord = { version = "1.0.9", optional = true }
 
 pdf-extract = { version = "0.12.0", optional = true }
@@ -180,6 +186,8 @@ walkdir = { version = "2.5.0", optional = true }
 xmltree = { version = "0.12.0", optional = true }
 
 zip = { version = "8.6.0", optional = true }
+image = "0.25.9"
+rayon = "1.12.0"
 
 # ------------------------------------------------------------
 # Development
