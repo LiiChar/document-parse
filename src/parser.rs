@@ -112,12 +112,12 @@ impl DocumentParser {
         }
     }
 
-    pub fn with_options(&mut self, options: ParseOptions) -> &mut Self {
+    pub fn with_options(mut self, options: ParseOptions) -> Self {
         self.options = options;
         self
     }
 
-    pub fn register_loader(&mut self, loader: impl Loader + 'static) -> &mut Self {
+    pub fn register_loader(mut self, loader: impl Loader + 'static) -> Self {
         self.loaders.push(Box::new(loader));
         self
     }
