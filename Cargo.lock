@@ -590,7 +590,7 @@ dependencies = [
 
 [[package]]
 name = "document-parser"
-version = "0.1.0-alpha.14"
+version = "0.1.0-alpha.15"
 dependencies = [
  "ammonia",
  "base64",
