@@ -1,6 +1,7 @@
 use std::{collections::HashMap, fs::File, io::Read, path::Path};
 
 use encoding_rs::Encoding;
+use regex::Regex;
 use roxmltree::Document;
 use zip::ZipArchive;
 
@@ -8,6 +9,7 @@ use crate::{
     error::Error,
     model::{RawChapter, RawDocument, RawMetadata, RawResource},
     parser::{Loader, ParseOptions},
+    utils::text::escape_html,
 };
 
 pub struct EpubLoader;
@@ -268,7 +270,23 @@ fn normalize_epub_html(
             }
         }
     }
-    html
+    replace_svg_image_wrappers(&html)
+}
+
+fn replace_svg_image_wrappers(html: &str) -> String {
+    static SVG_IMAGE: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
+    let regex = SVG_IMAGE.get_or_init(|| {
+        Regex::new(
+            r#"(?is)<svg\b[^>]*>.*?<image\b[^>]*?(?:xlink:)?href\s*=\s*["']([^"']+)["'][^>]*/?>.*?</svg\s*>"#,
+        )
+        .expect("valid SVG image regex")
+    });
+
+    regex
+        .replace_all(html, |captures: &regex::Captures<'_>| {
+            format!("<img src=\"{}\" alt=\"\" />", escape_html(&captures[1]))
+        })
+        .into_owned()
 }
 
 fn relative_zip_path(from_dir: &str, target: &str) -> String {
@@ -508,5 +526,24 @@ mod tests {
         let html = r#"<img src="../images/plate 1.jpg"/>"#;
         let result = normalize_epub_html(html, "text/chapter.xhtml", "OEBPS", &package);
         assert!(result.contains(r#"src="illustration-1""#), "{result}");
+    }
+
+    #[test]
+    fn svg_cover_wrapper_becomes_a_renderable_image() {
+        let mut package = EpubPackage::default();
+        package.manifest.insert(
+            "cover-id".into(),
+            ManifestItem {
+                href: "cover.jpg".into(),
+                media_type: "image/jpeg".into(),
+                properties: "cover-image".into(),
+            },
+        );
+        let html = r#"<html xmlns="http://www.w3.org/1999/xhtml" xmlns:xlink="http://www.w3.org/1999/xlink"><head><title>"Cover"</title></head><body><div><svg><image xlink:href="cover.jpg"/></svg></div></body></html>"#;
+        let result = normalize_epub_html(html, "wrap0000.xhtml", "OEBPS", &package);
+        assert!(
+            result.contains(r#"<img src="cover-id" alt="" />"#),
+            "{result}"
+        );
     }
 }

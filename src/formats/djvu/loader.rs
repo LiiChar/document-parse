@@ -252,17 +252,10 @@ impl DjvuLoader {
                     ),
                 };
 
-                return Ok((chapter, Some(resource)));
+                Ok((chapter, Some(resource)))
             }
-            Err(error) => return Err(error),
+            Err(error) => Err(error),
         }
-        Ok((
-            RawChapter {
-                title: Some(format!("Page {}", index + 1)),
-                content: format!("<p>Page {}</p>", index + 1),
-            },
-            None,
-        ))
     }
 }
 
