@@ -185,7 +185,7 @@ fn extract_chapters(
 
         let title = extract_html_title(&html);
 
-        let html = normalize_epub_html(&html);
+        let html = normalize_epub_html(&html, &item.href, base_dir, package);
 
         chapters.push(RawChapter {
             title,
@@ -237,12 +237,53 @@ fn extract_resources(
 // MARK: - EPUB HTML
 //
 
-fn normalize_epub_html(html: &str) -> String {
+fn normalize_epub_html(
+    html: &str,
+    chapter_href: &str,
+    base_dir: &str,
+    package: &EpubPackage,
+) -> String {
     // EPUB chapter всегда возвращаем как HTML.
     //
     // Здесь намеренно нет sanitize_html() —
     // это делает finalize().
-    html.trim().to_owned()
+    let mut html = html.trim().to_owned();
+    let chapter_path = join_epub_path(base_dir, chapter_href);
+    let chapter_dir = base_dir_from_path(&chapter_path);
+
+    // XHTML references image files by URL, whereas the common resource pipeline
+    // identifies them by their OPF manifest ID. Map both the href and its path
+    // relative to this chapter to that ID before handing the chapter downstream.
+    for (id, item) in &package.manifest {
+        if !item.media_type.starts_with("image/") {
+            continue;
+        }
+        let image_path = join_epub_path(base_dir, &item.href);
+        let relative_path = relative_zip_path(&chapter_dir, &image_path);
+        for reference in [item.href.as_str(), relative_path.as_str()] {
+            for quote in ['"', '\''] {
+                let old = format!("{quote}{reference}{quote}");
+                let new = format!("{quote}{id}{quote}");
+                html = html.replace(&old, &new);
+            }
+        }
+    }
+    html
+}
+
+fn relative_zip_path(from_dir: &str, target: &str) -> String {
+    let from = from_dir
+        .split('/')
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>();
+    let to = target
+        .split('/')
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>();
+    let common = from.iter().zip(&to).take_while(|(a, b)| a == b).count();
+    let mut result = vec![".."; from.len().saturating_sub(common)];
+    result.extend(to[common..].iter().copied());
+    result.join("/")
 }
 
 fn extract_html_title(html: &str) -> Option<String> {
@@ -447,4 +488,25 @@ fn resolve_cover_id(package: &EpubPackage) -> Option<String> {
                     .unwrap_or(false)
         })
         .map(|(id, _)| id.clone())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn chapter_image_paths_are_rewritten_to_manifest_ids() {
+        let mut package = EpubPackage::default();
+        package.manifest.insert(
+            "illustration-1".into(),
+            ManifestItem {
+                href: "images/plate 1.jpg".into(),
+                media_type: "image/jpeg".into(),
+                properties: String::new(),
+            },
+        );
+        let html = r#"<img src="../images/plate 1.jpg"/>"#;
+        let result = normalize_epub_html(html, "text/chapter.xhtml", "OEBPS", &package);
+        assert!(result.contains(r#"src="illustration-1""#), "{result}");
+    }
 }

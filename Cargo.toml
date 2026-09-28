@@ -33,50 +33,51 @@ homepage = "https://github.com/LiiChar/document-parse"
 
 default = ["full"]
 
-# Все поддерживаемые форматы.
-full = [
+ebook = [
+    "epub",
+    "fb2",
+    "mobi",
+    "cbz",
+]
+
+documents = [
     "txt",
     "markdown",
     "html",
     "rtf",
-    "fb2",
-    "epub",
-    "cbz",
     "docx",
-    "mobi",
+]
+
+# Все поддерживаемые форматы.
+full = [
+    "ebook",
+    "documents",
     "pdf",
-    "djvu"
+    "djvu",
 ]
 
 # ------------------------------------------------------------
 # Individual formats
 # ------------------------------------------------------------
 
-txt = [
-    "dep:encoding_rs",
-]
+txt = []
 
 markdown = [
     "dep:pulldown-cmark",
 ]
 
-html = [
-    "dep:encoding_rs",
-]
+html = []
 
 rtf = [
-    "dep:encoding_rs",
     "dep:rtf-parser",
 ]
 
 fb2 = [
-    "dep:encoding_rs",
     "dep:roxmltree",
     "dep:zip",
 ]
 
 epub = [
-    "dep:encoding_rs",
     "dep:roxmltree",
     "dep:zip",
 ]
@@ -161,7 +162,7 @@ log = { version = "0.4", optional = true }
 # Optional format dependencies
 # ------------------------------------------------------------
 
-encoding_rs = { version = "0.8.35", optional = true }
+encoding_rs = "0.8.35"
 
 docx-rust = { version = "0.1.11", optional = true }
 

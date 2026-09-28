@@ -1,8 +1,8 @@
 // Альфа версия загрузчика, необходимо будет переделать
 
 use rayon::prelude::*;
+use std::path::Path;
 use std::sync::mpsc;
-use std::{fs, path::Path, sync::Arc};
 
 use djvu::Document;
 use image::{ImageBuffer, Rgba, codecs::jpeg::JpegEncoder};
@@ -88,18 +88,13 @@ impl DjvuLoader {
         pages: usize,
         title: String,
     ) -> Result<RawDocument, Error> {
-        // Создаем Arc для разделения документа между потоками
-        let document_arc = Arc::new(document.clone());
-
         // Создаем каналы для сбора результатов
         let (tx, rx) = mpsc::channel();
 
         // Параллельно обрабатываем страницы
         (0..pages).into_par_iter().for_each(|index| {
             let tx = tx.clone();
-            let document = document_arc.clone();
-
-            let result = std::panic::catch_unwind(|| self.process_page_parallel(&document, index));
+            let result = std::panic::catch_unwind(|| self.process_page_parallel(document, index));
 
             match result {
                 Ok(Ok((chapter, resource))) => {
@@ -184,41 +179,27 @@ impl DjvuLoader {
             }
         }
 
-        // Текст отсутствует - рендерим только первые 3 страницы
-        const MAX_RENDER_PAGES: usize = 3;
+        // Textless pages are scanned images; render every page so the document is complete.
+        let resource_id = format!("page-{}.jpg", index + 1);
 
-        if index < MAX_RENDER_PAGES {
-            let resource_id = format!("page-{}.jpg", index + 1);
+        match render_page_to_jpeg(page, index) {
+            Ok(image_data) => {
+                resources.push(RawResource {
+                    id: resource_id.clone(),
+                    mime_type: "image/jpeg".to_owned(),
+                    data: image_data,
+                });
 
-            match render_page_to_jpeg(page, index) {
-                Ok(image_data) => {
-                    resources.push(RawResource {
-                        id: resource_id.clone(),
-                        mime_type: "image/jpeg".to_owned(),
-                        data: image_data,
-                    });
-
-                    chapters.push(RawChapter {
-                        title: Some(format!("Page {}", index + 1)),
-                        content: format!(
-                            r#"<p><img src="{}" alt="Page {}" loading="lazy" /></p>"#,
-                            escape_html(&resource_id),
-                            index + 1,
-                        ),
-                    });
-                }
-                Err(error) => {
-                    chapters.push(RawChapter {
-                        title: Some(format!("Page {}", index + 1)),
-                        content: format!("<p>Page {}</p>", index + 1),
-                    });
-                }
+                chapters.push(RawChapter {
+                    title: Some(format!("Page {}", index + 1)),
+                    content: format!(
+                        r#"<p><img src="{}" alt="Page {}" loading="lazy" /></p>"#,
+                        escape_html(&resource_id),
+                        index + 1,
+                    ),
+                });
             }
-        } else {
-            chapters.push(RawChapter {
-                title: Some(format!("Page {}", index + 1)),
-                content: format!("<p>Page {}</p>", index + 1),
-            });
+            Err(error) => return Err(error),
         }
 
         Ok(())
@@ -227,7 +208,7 @@ impl DjvuLoader {
     /// Обработка одной страницы (параллельная версия)
     fn process_page_parallel(
         &self,
-        document: &Arc<&Document>,
+        document: &Document,
         index: usize,
     ) -> Result<(RawChapter, Option<RawResource>), Error> {
         let page = document.page(index).map_err(|error| {
@@ -251,35 +232,30 @@ impl DjvuLoader {
             }
         }
 
-        // Текст отсутствует - рендерим только первые 3 страницы
-        const MAX_RENDER_PAGES: usize = 3;
+        // Textless pages are scanned images; render every page so the document is complete.
+        let resource_id = format!("page-{}.jpg", index + 1);
 
-        if index < MAX_RENDER_PAGES {
-            let resource_id = format!("page-{}.jpg", index + 1);
+        match render_page_to_jpeg(&page, index) {
+            Ok(image_data) => {
+                let resource = RawResource {
+                    id: resource_id.clone(),
+                    mime_type: "image/jpeg".to_owned(),
+                    data: image_data,
+                };
 
-            match render_page_to_jpeg(&page, index) {
-                Ok(image_data) => {
-                    let resource = RawResource {
-                        id: resource_id.clone(),
-                        mime_type: "image/jpeg".to_owned(),
-                        data: image_data,
-                    };
+                let chapter = RawChapter {
+                    title: Some(format!("Page {}", index + 1)),
+                    content: format!(
+                        r#"<p><img src="{}" alt="Page {}" loading="lazy" /></p>"#,
+                        escape_html(&resource_id),
+                        index + 1,
+                    ),
+                };
 
-                    let chapter = RawChapter {
-                        title: Some(format!("Page {}", index + 1)),
-                        content: format!(
-                            r#"<p><img src="{}" alt="Page {}" loading="lazy" /></p>"#,
-                            escape_html(&resource_id),
-                            index + 1,
-                        ),
-                    };
-
-                    return Ok((chapter, Some(resource)));
-                }
-                Err(error) => {}
+                return Ok((chapter, Some(resource)));
             }
+            Err(error) => return Err(error),
         }
-
         Ok((
             RawChapter {
                 title: Some(format!("Page {}", index + 1)),

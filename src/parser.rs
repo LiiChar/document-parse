@@ -5,14 +5,10 @@ use std::{
 };
 
 use base64::{Engine, engine::general_purpose::STANDARD as BASE64};
+use sha2::{Digest, Sha256};
 
 use crate::{
     error::Error,
-    formats::{
-        cbz::CbzLoader, djvu::loader::DjvuLoader, docx::DocxLoader, epub::EpubLoader,
-        fb2::Fb2Loader, html::HtmlLoader, markdown::MarkdownLoader, mobi::MobiLoader,
-        pdf::PdfLoader, rtf::RtfLoader, txt::TxtLoader,
-    },
     model::{Chapter, ChapterContent, Content, Document, Metadata, RawDocument, RawResource},
     utils::{
         fs::{generate_resource_directory_name, mime_extension},
@@ -22,6 +18,29 @@ use crate::{
         text::fallback_title,
     },
 };
+
+#[cfg(feature = "cbz")]
+use crate::formats::cbz::CbzLoader;
+#[cfg(feature = "djvu")]
+use crate::formats::djvu::loader::DjvuLoader;
+#[cfg(feature = "docx")]
+use crate::formats::docx::DocxLoader;
+#[cfg(feature = "epub")]
+use crate::formats::epub::EpubLoader;
+#[cfg(feature = "fb2")]
+use crate::formats::fb2::Fb2Loader;
+#[cfg(feature = "html")]
+use crate::formats::html::HtmlLoader;
+#[cfg(feature = "markdown")]
+use crate::formats::markdown::MarkdownLoader;
+#[cfg(feature = "mobi")]
+use crate::formats::mobi::MobiLoader;
+#[cfg(feature = "pdf")]
+use crate::formats::pdf::PdfLoader;
+#[cfg(feature = "rtf")]
+use crate::formats::rtf::RtfLoader;
+#[cfg(feature = "txt")]
+use crate::formats::txt::TxtLoader;
 
 pub trait Loader: Send + Sync {
     fn supports(&self, path: &Path) -> bool;
@@ -183,18 +202,21 @@ impl DocumentParser {
         html: String,
         resources: &ProcessedResources,
     ) -> Chapter {
-        let html = replace_resource_references(&html, resources);
-
         let content = match self.options.content_type {
             ContentType::Html => {
-                let html = if self.options.normalize_whitespace {
-                    normalize_html_whitespace(&html)
+                // Sanitize untrusted source markup before inserting generated resource URLs.
+                // In particular, ammonia correctly rejects `data:` URLs from source HTML,
+                // while Base64 URLs produced from the document's own resources are trusted.
+                let html = if self.options.sanitize_html {
+                    sanitize_html(&html)
                 } else {
                     html
                 };
 
-                let html = if self.options.sanitize_html {
-                    sanitize_html(&html)
+                let html = replace_resource_references(&html, resources);
+
+                let html = if self.options.normalize_whitespace {
+                    normalize_html_whitespace(&html)
                 } else {
                     html
                 };
@@ -269,10 +291,13 @@ impl DocumentParser {
 
         let extension = mime_extension(&resource.mime_type);
 
+        // Resource IDs originate in document contents and may contain path
+        // separators or traversal components. Never use them as filesystem paths.
+        let safe_id = hex::encode(Sha256::digest(resource.id.as_bytes()));
         let file_name = if extension.is_empty() {
-            resource.id.clone()
+            safe_id
         } else {
-            format!("{}.{}", resource.id, extension,)
+            format!("{}.{}", safe_id, extension,)
         };
 
         let path = resource_dir.join(file_name);
@@ -377,4 +402,51 @@ fn detect_document_language_with_limit(chapters: &[Chapter], max_chars: usize) -
     }
 
     detect_document_language(&chapters_for_detection)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::{RawChapter, RawMetadata};
+
+    #[test]
+    fn sanitized_html_keeps_generated_base64_images() {
+        let options = ParseOptions {
+            image_load: ImageLoadType::Base64,
+            sanitize_html: true,
+            ..Default::default()
+        };
+        let raw = RawDocument {
+            metadata: RawMetadata {
+                title: Some("image test".into()),
+                author: None,
+                description: None,
+                language: None,
+                cover_id: Some("cover".into()),
+            },
+            chapters: vec![RawChapter {
+                title: None,
+                content: r#"<p><img src="cover" alt="cover"></p>"#.into(),
+            }],
+            resources: vec![RawResource {
+                id: "cover".into(),
+                mime_type: "image/png".into(),
+                data: vec![1, 2, 3],
+            }],
+        };
+
+        let document = DocumentParser::new()
+            .with_options(options)
+            .finalize(raw, Path::new("book.epub"))
+            .expect("finalization should succeed");
+
+        let ChapterContent::Html(html) = &document.content.chapters[0].content else {
+            panic!("expected HTML content");
+        };
+        assert!(
+            html.contains("src=\"data:image/png;base64,AQID\""),
+            "{html}"
+        );
+        assert_eq!(document.metadata.cover.as_deref(), Some(&[1, 2, 3][..]));
+    }
 }

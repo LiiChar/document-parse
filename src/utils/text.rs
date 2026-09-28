@@ -30,12 +30,14 @@ enum HeadingKind {
 ///   считать любую короткую строку заголовком.
 /// - Приоритет имеют явные конструкции:
 ///
-///     Глава I. Название
-///     Глава 1. Название
-///     I. Название
-///     1. Название
-///     Часть первая
-///     Chapter 1
+/// ```text
+/// Глава I. Название
+/// Глава 1. Название
+/// I. Название
+/// 1. Название
+/// Часть первая
+/// Chapter 1
+/// ```
 ///
 /// - Обычные предложения и реплики никогда не считаются главами.
 /// - Если структура глав не подтверждается несколькими заголовками,
@@ -416,10 +418,8 @@ fn parse_numbered_heading(text: &str) -> Option<String> {
     static RE: OnceLock<Regex> = OnceLock::new();
 
     let re = RE.get_or_init(|| {
-        Regex::new(
-            r"(?iu)^\s*(?P<number>\d{1,4})\s*[\.\-:)]\s+(?P<title>[^\d].{1,119})$",
-        )
-        .expect("valid numbered heading regex")
+        Regex::new(r"(?iu)^\s*(?P<number>\d{1,4})\s*[\.\-:)]\s+(?P<title>[^\d].{1,119})$")
+            .expect("valid numbered heading regex")
     });
 
     let captures = re.captures(text)?;
@@ -563,22 +563,8 @@ fn looks_like_sentence(text: &str) -> bool {
      * Английские конструкции.
      */
     let english_sentence_markers = [
-        " and ",
-        " but ",
-        " this ",
-        " that ",
-        " was ",
-        " were ",
-        " have ",
-        " has ",
-        " had ",
-        " will ",
-        " when ",
-        " which ",
-        " who ",
-        " they ",
-        " he ",
-        " she ",
+        " and ", " but ", " this ", " that ", " was ", " were ", " have ", " has ", " had ",
+        " will ", " when ", " which ", " who ", " they ", " he ", " she ",
     ];
 
     english_sentence_markers
@@ -586,56 +572,11 @@ fn looks_like_sentence(text: &str) -> bool {
         .any(|marker| lower.contains(marker))
 }
 
-fn is_title_case(text: &str) -> bool {
-    let words: Vec<&str> = text.split_whitespace().collect();
-
-    if words.is_empty() {
-        return false;
-    }
-
-    let mut meaningful = 0;
-    let mut uppercase = 0;
-
-    for word in words {
-        let clean = word.trim_matches(|c: char| !c.is_alphabetic());
-
-        if clean.is_empty() {
-            continue;
-        }
-
-        meaningful += 1;
-
-        if clean
-            .chars()
-            .next()
-            .map(|c| c.is_uppercase())
-            .unwrap_or(false)
-        {
-            uppercase += 1;
-        }
-    }
-
-    meaningful > 0 && uppercase as f32 / meaningful as f32 >= 0.6
-}
-
-fn is_all_caps(text: &str) -> bool {
-    let letters: Vec<char> = text.chars().filter(|c| c.is_alphabetic()).collect();
-
-    if letters.len() < 3 {
-        return false;
-    }
-
-    letters.iter().all(|c| !c.is_lowercase())
-}
-
 /* -------------------------------------------------------------------------- */
 /* Building chapters                                                          */
 /* -------------------------------------------------------------------------- */
 
-fn build_chapters_from_boundaries(
-    lines: &[&str],
-    boundaries: &[ChapterBoundary],
-) -> Vec<Chapter> {
+fn build_chapters_from_boundaries(lines: &[&str], boundaries: &[ChapterBoundary]) -> Vec<Chapter> {
     let mut chapters = Vec::new();
 
     for (position, boundary) in boundaries.iter().enumerate() {
@@ -869,10 +810,7 @@ pub fn fallback_title(path: &std::path::Path, text: Option<String>) -> String {
 
 fn title_from_text(text: &str) -> Option<String> {
     for raw_line in text.lines().take(30) {
-        let line = raw_line
-            .trim()
-            .trim_start_matches('\u{FEFF}')
-            .trim();
+        let line = raw_line.trim().trim_start_matches('\u{FEFF}').trim();
 
         if line.is_empty() {
             continue;
@@ -934,11 +872,7 @@ fn title_from_filename(path: &std::path::Path) -> Option<String> {
         .collect::<Vec<_>>()
         .join(" ");
 
-    if title.is_empty() {
-        None
-    } else {
-        Some(title)
-    }
+    if title.is_empty() { None } else { Some(title) }
 }
 
 fn clean_title(text: &str) -> String {
@@ -946,16 +880,7 @@ fn clean_title(text: &str) -> String {
         .trim_matches(|c: char| {
             matches!(
                 c,
-                '#' | '*'
-                    | '_'
-                    | '"'
-                    | '\''
-                    | '“'
-                    | '”'
-                    | '«'
-                    | '»'
-                    | ' '
-                    | '\t'
+                '#' | '*' | '_' | '"' | '\'' | '“' | '”' | '«' | '»' | ' ' | '\t'
             )
         })
         .trim()

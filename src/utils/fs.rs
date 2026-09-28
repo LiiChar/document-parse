@@ -12,6 +12,7 @@ pub fn mime_extension(mime: &str) -> &'static str {
         "image/bmp" => "bmp",
         "image/tiff" => "tiff",
         "image/x-icon" => "ico",
+        "image/avif" => "avif",
         _ => "",
     }
 }
